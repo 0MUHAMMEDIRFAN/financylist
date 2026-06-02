@@ -9,6 +9,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Download, FileSpreadsheet, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -16,7 +19,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export function CustomerReportPage({ customerId }: { customerId: string }) {
-  const { getCustomerById, getTransactionsByCustomerId, loading } = useApp();
+  const { getCustomerById, getTransactionsByCustomerId, loading, tags: availableTags } = useApp();
   
   const customer = getCustomerById(customerId);
   const transactions = getTransactionsByCustomerId(customerId);
@@ -24,9 +27,23 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [searchTerm, setSearchTerm] = useState('');
+  
+  const [showRefunded, setShowRefunded] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  };
+
+  const activeFilterCount = (showRefunded ? 1 : 0) + (selectedTags.length > 0 ? 1 : 0);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
+      if (!showRefunded && t.isRefund) return false;
+
+      if (selectedTags.length > 0) {
+        if (!t.tags.some(tag => selectedTags.includes(tag))) return false;
+      }
       let matchesDate = true;
       const tDate = new Date(t.date);
       if (startDate) matchesDate = matchesDate && tDate >= new Date(startDate);
@@ -43,7 +60,7 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
       
       return matchesDate && matchesSearch;
     });
-  }, [transactions, startDate, endDate, searchTerm]);
+  }, [transactions, startDate, endDate, searchTerm, showRefunded, selectedTags]);
 
   const netBalance = calculateBalance(filteredTransactions);
   const totalGave = filteredTransactions.filter(t => t.type === 'GAVE').reduce((sum, t) => sum + t.amount, 0);
@@ -114,55 +131,75 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
         }
       />
       <main className="flex-1">
-        <div className="container mx-auto px-4 py-8 md:px-6">
+        <div className="container mx-auto px-4 py-4 md:px-6">
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <Card className="bg-muted/30">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm font-medium text-muted-foreground mb-1">Net Balance</p>
-                <p className={cn("text-xl font-bold", netBalance > 0 ? "text-destructive" : netBalance < 0 ? "text-positive" : "")}>
-                  {netBalance === 0 ? "Settled Up" : netBalance > 0 ? `You will give ${formatCurrency(netBalance)}` : `You will get ${formatCurrency(Math.abs(netBalance))}`}
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="bg-destructive/10 border-destructive/20 shadow-sm">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm font-medium text-destructive mb-1">Total Gave</p>
-                <p className="text-xl font-bold text-destructive">{formatCurrency(totalGave)}</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-positive/10 border-positive/20 shadow-sm">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm font-medium text-positive mb-1">Total Got</p>
-                <p className="text-xl font-bold text-positive">{formatCurrency(totalGot)}</p>
-              </CardContent>
-            </Card>
-          </div>
+          <Card className="w-full mb-6 shadow-sm">
+            <CardContent className="flex gap-6 items-center justify-between px-4 py-2">
+              <span className={cn("text-lg font-medium", netBalance > 0 ? "text-destructive" : netBalance < 0 ? "text-positive" : "")}>
+                {netBalance === 0 ? "Settled Up" : netBalance > 0 ? "You will give" : "You will get"}
+              </span>
+              <span className={cn("text-2xl font-bold", netBalance > 0 ? "text-destructive" : netBalance < 0 ? "text-positive" : "text-muted-foreground")}>
+                {formatCurrency(Math.abs(netBalance))}
+              </span>
+            </CardContent>
+          </Card>
 
           <div className="space-y-4 mb-8">
-            <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex">
               <div className="flex-1 space-y-2">
-                <Label>Start Date</Label>
-                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <Label>From</Label>
+                <Input type="date" className='rounded-tr-none rounded-br-none' value={startDate} onChange={(e) => setStartDate(e.target.value)} />
               </div>
               <div className="flex-1 space-y-2">
-                <Label>End Date</Label>
-                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <Label>To</Label>
+                <Input type="date" className='rounded-tl-none rounded-bl-none' value={endDate} onChange={(e) => setEndDate(e.target.value)} />
               </div>
             </div>
-            <div className="flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex gap-2 items-end">
               <div className="flex-1 space-y-2">
-                <Label>Search Description</Label>
-                <Input placeholder="Filter by keyword..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                <Input placeholder="Search Entries..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
               </div>
-              <div className="flex gap-2 w-full md:w-auto">
-                <Button onClick={exportExcel} variant="outline" className="flex-1 md:flex-none">
-                  <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
-                </Button>
-                <Button onClick={exportPDF} className="flex-1 md:flex-none">
-                  <Download className="w-4 h-4 mr-2" /> PDF
-                </Button>
-              </div>
+              
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="mb-[2px] relative">
+                    Filter
+                    {activeFilterCount > 0 && (
+                      <Badge className="ml-2 px-1.5 min-w-[20px] h-5" variant="secondary">
+                        {activeFilterCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80" align="end">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <h4 className="font-medium leading-none">Tags</h4>
+                      <p className="text-sm text-muted-foreground">Filter by specific tags.</p>
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        {availableTags.length === 0 && <span className="text-xs text-muted-foreground">No tags found.</span>}
+                        {availableTags.map(tag => (
+                          <Badge 
+                            key={tag} 
+                            variant={selectedTags.includes(tag) ? "default" : "outline"}
+                            className="cursor-pointer"
+                            onClick={() => toggleTag(tag)}
+                          >
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="border-t pt-4 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Show Refunded</Label>
+                        <p className="text-xs text-muted-foreground">Include refunded transactions.</p>
+                      </div>
+                      <Switch checked={showRefunded} onCheckedChange={setShowRefunded} />
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -171,8 +208,12 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
               <thead className="bg-muted text-muted-foreground uppercase">
                 <tr>
                   <th className="px-4 py-3 font-medium">Entry Details</th>
-                  <th className="px-4 py-3 font-medium text-right text-positive">Get</th>
-                  <th className="px-4 py-3 font-medium text-right text-destructive">Give</th>
+                  <th className="px-4 py-3 font-medium text-right text-positive">
+                    Get <span className="block text-xs font-bold">{formatCurrency(totalGot)}</span>
+                  </th>
+                  <th className="px-4 py-3 font-medium text-right text-destructive">
+                    Give <span className="block text-xs font-bold">{formatCurrency(totalGave)}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -206,6 +247,17 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
 
         </div>
       </main>
+
+      <div className="sticky bottom-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-4 pb-6 mt-auto shadow-[0_-4px_10px_-10px_rgba(0,0,0,0.2)]">
+        <div className="container mx-auto flex gap-4 max-w-md">
+            <Button onClick={exportExcel} variant="outline" className="flex-1 h-12">
+              <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
+            </Button>
+            <Button onClick={exportPDF} className="flex-1 h-12">
+              <Download className="w-4 h-4 mr-2" /> PDF
+            </Button>
+        </div>
+      </div>
     </div>
   );
 }

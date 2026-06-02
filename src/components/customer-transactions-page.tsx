@@ -8,11 +8,10 @@ import { Header } from '@/components/header';
 import { Balance } from '@/components/balance';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, ArrowUpRight, ArrowDownLeft, MoreVertical, Edit, Trash2, FileText } from 'lucide-react';
 import { AddTransactionSheet } from './add-transaction-sheet';
-import { ReportDialog } from './report-dialog';
 import { Transaction, TransactionType } from '@/lib/types';
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -132,7 +131,12 @@ export function CustomerTransactionsPage({ customerId }: { customerId: string })
   return (
     <div className="flex min-h-screen w-full flex-col">
       <Header
-        title={customer.name}
+        title={
+          <Link href={`/customers/${customerId}/edit`} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+            <span className="truncate max-w-xs w-full">{customer.name}</span>
+            <span className="text-muted-foreground"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-pencil"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
+          </Link>
+        }
         leftNode={
           <Button asChild variant="outline" size="icon">
             <Link href="/">
@@ -148,10 +152,17 @@ export function CustomerTransactionsPage({ customerId }: { customerId: string })
         </Button>
       </Header>
       <main className="flex-1">
-        <div className="container mx-auto px-4 py-8 md:px-6">
-          <div className="flex flex-col gap-2 mb-6 border-b pb-6">
-            <Balance balance={balance} label="Net Balance" isLarge={true} />
-          </div>
+        <div className="container mx-auto px-4 py-4 md:px-6">
+          <Card className="w-full mb-6 shadow-sm">
+            <CardContent className="flex gap-6 items-center justify-between px-4 py-2">
+              <span className={cn("text-lg font-medium", balance > 0 ? "text-destructive" : balance < 0 ? "text-positive" : "")}>
+                {balance === 0 ? "Settled Up" : balance > 0 ? "You will give" : "You will get"}
+              </span>
+              <span className={cn("text-2xl font-bold", balance > 0 ? "text-destructive" : balance < 0 ? "text-positive" : "text-muted-foreground")}>
+                {formatCurrency(Math.abs(balance))}
+              </span>
+            </CardContent>
+          </Card>
 
           {loading ? (
             <div className="space-y-4">
@@ -173,13 +184,12 @@ export function CustomerTransactionsPage({ customerId }: { customerId: string })
           ) : transactions.length === 0 ? (
              <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/20 py-20 text-center">
               <h3 className="text-xl font-semibold text-muted-foreground">No Transactions Yet</h3>
-              <p className="text-muted-foreground mt-2">Use the buttons above to add a new transaction.</p>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {Object.entries(groupedTransactions).map(([date, txns]) => (
                   <div key={date}>
-                      <h2 className="mb-2 text-sm font-semibold text-muted-foreground tracking-wider uppercase">{new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</h2>
+                      <h2 className="mb-1 text-sm font-semibold text-muted-foreground tracking-wider uppercase">{new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</h2>
                       <div className="space-y-2">
                       {txns.map(t => (
                           <Card key={t.id}>

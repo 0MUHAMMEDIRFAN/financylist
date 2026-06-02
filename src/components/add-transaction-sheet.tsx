@@ -43,7 +43,7 @@ import { suggestTransactionDetails } from '@/ai/flows/suggest-transaction-detail
 
 const transactionSchema = z.object({
   amount: z.coerce.number().positive('Amount must be positive.'),
-  description: z.string().min(1, 'Description is required.'),
+  description: z.string().optional(),
   tags: z.string().optional(),
   date: z.date(),
   isRefund: z.boolean(),
@@ -111,7 +111,7 @@ export function AddTransactionSheet({
       customerId,
       type: transactionToEdit?.type || transactionType,
       amount: values.amount,
-      description: values.description,
+      description: values.description || "",
       tags: values.tags?.split(',').map((tag) => tag.trim()).filter(Boolean) || [],
       date: values.date.toISOString(),
       isRefund: values.isRefund,
@@ -157,15 +157,13 @@ export function AddTransactionSheet({
     });
   }
 
-  const title = transactionToEdit ? 'Edit Transaction' : `Add "You ${transactionType === 'GAVE' ? 'Gave' : 'Got'}"`;
-  const sheetDescription = transactionToEdit ? `Editing a transaction for ${customer?.name}.` : `Adding a new transaction for ${customer?.name}.`
+  const title = `You will ${transactionType === 'GAVE' ? 'give to' : 'get from'} ${customer?.name || ''}`;
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
         <SheetHeader>
           <SheetTitle>{title}</SheetTitle>
-          <SheetDescription>{sheetDescription}</SheetDescription>
         </SheetHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 py-6">
@@ -202,12 +200,12 @@ export function AddTransactionSheet({
               )}
             />
 
-            <div className="flex flex-wrap gap-4 items-end">
+            <div className="flex flex-row gap-4 items-end">
               <FormField
                 control={form.control}
                 name="date"
                 render={({ field }) => (
-                  <FormItem className="flex-1 min-w-[200px]">
+                  <FormItem className="flex-1">
                     <FormLabel>Date</FormLabel>
                     <FormControl>
                       <Input type="date" className="w-full" {...field} value={field.value ? format(field.value, 'yyyy-MM-dd') : ''} onChange={(e) => field.onChange(new Date(e.target.value))} />
@@ -220,9 +218,9 @@ export function AddTransactionSheet({
                 control={form.control}
                 name="isRefund"
                 render={({ field }) => (
-                  <FormItem className="flex flex-1 min-w-[200px] flex-row items-center justify-between rounded-lg border p-3 shadow-sm mt-2 sm:mt-0">
+                  <FormItem className="flex flex-1 flex-row items-center justify-between rounded-lg border p-3 shadow-sm h-10 space-y-0">
                     <div className="space-y-0.5">
-                      <FormLabel>Is this a refund?</FormLabel>
+                      <FormLabel className="text-sm">Refund?</FormLabel>
                     </div>
                     <FormControl>
                       <Switch
@@ -271,16 +269,19 @@ export function AddTransactionSheet({
                     <div className="flex flex-wrap gap-2 items-center">
                       {tags.map((tag) => {
                         const isSelected = currentTags.includes(tag);
-                        if (!isSelected) return null;
                         return (
                           <Button
                             key={tag}
                             type="button"
-                            variant="secondary"
+                            variant={isSelected ? 'default' : 'outline'}
                             size="sm"
-                            className="rounded-full h-8"
+                            className={cn("rounded-full h-8", isSelected && "bg-primary text-primary-foreground")}
                             onClick={() => {
-                              field.onChange(currentTags.filter(t => t !== tag).join(', '));
+                              if (isSelected) {
+                                field.onChange(currentTags.filter(t => t !== tag).join(', '));
+                              } else {
+                                field.onChange([...currentTags, tag].join(', '));
+                              }
                             }}
                           >
                             {tag}
@@ -297,21 +298,7 @@ export function AddTransactionSheet({
                         <PopoverContent className="w-64 p-3" align="start">
                           <div className="space-y-3">
                             <h4 className="font-medium text-sm">Add Tag</h4>
-                            <div className="flex flex-wrap gap-2">
-                              {tags.filter(t => !currentTags.includes(t)).map(tag => (
-                                <Button
-                                  key={tag}
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="rounded-full text-xs h-7"
-                                  onClick={() => field.onChange([...currentTags, tag].join(', '))}
-                                >
-                                  {tag}
-                                </Button>
-                              ))}
-                            </div>
-                            <div className="flex items-center gap-2 pt-2 border-t mt-2">
+                            <div className="flex items-center gap-2 pt-2">
                               <Input
                                 placeholder="New tag name..."
                                 value={newTag}

@@ -58,9 +58,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const isOnLoginPage = pathname === '/login';
+
+  // Show nothing (or a spinner) while auth state is being determined
+  if (loading) {
+    return (
+      <AuthContext.Provider value={{ user, loading, signInWithGoogle, logout }}>
+        <div className="flex h-screen w-screen items-center justify-center bg-background">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      </AuthContext.Provider>
+    );
+  }
+
+  // If not logged in and not on login page, render nothing — the useEffect redirect will fire
+  if (!user && !isOnLoginPage) {
+    return (
+      <AuthContext.Provider value={{ user, loading, signInWithGoogle, logout }}>
+        <div className="flex h-screen w-screen items-center justify-center bg-background">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      </AuthContext.Provider>
+    );
+  }
+
   return (
     <AuthContext.Provider value={{ user, loading, signInWithGoogle, logout }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };

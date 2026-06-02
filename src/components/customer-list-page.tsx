@@ -2,16 +2,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useApp } from "@/hooks/use-app";
-import { calculateBalance } from "@/lib/utils";
+import { calculateBalance, formatCurrency } from "@/lib/utils";
 import { Header } from "@/components/header";
-import { AddCustomerDialog } from "@/components/add-customer-dialog";
+import { ImportDialog } from "@/components/import-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
-import { Search, MoreVertical, Upload, Plus, LogOut } from "lucide-react";
+import { Search, Settings, Upload, UserPlus, LogOut } from "lucide-react";
 import { Balance } from "./balance";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/context/auth-context";
@@ -20,6 +19,7 @@ export function CustomerListPage() {
   const { customers, getTransactionsByCustomerId, loading } = useApp();
   const { logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   const filteredCustomers = customers.filter((customer) =>
     customer.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -44,11 +44,11 @@ export function CustomerListPage() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon">
-              <MoreVertical className="h-5 w-5" />
+              <Settings className="h-5 w-5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => alert("Import functionality coming soon")}>
+            <DropdownMenuItem onClick={() => setIsImportOpen(true)}>
               <Upload className="mr-2 h-4 w-4" />
               Import Data
             </DropdownMenuItem>
@@ -77,16 +77,19 @@ export function CustomerListPage() {
             </Card>
           </div>
 
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex gap-4 items-center justify-between">
             <h1 className="text-2xl font-bold md:text-3xl">Customers</h1>
-            <div className="relative w-full max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-              <Input
-                placeholder="Search customers..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
+            <div className="flex-1 w-full max-w-xs">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder="Search..."
+                  className="w-full bg-background pl-8"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
           </div>
           {loading ? (
@@ -143,9 +146,12 @@ export function CustomerListPage() {
           )}
         </div>
       </main>
-      <div className="fixed bottom-6 right-6 z-50">
-        <AddCustomerDialog />
-      </div>
+      <Button asChild size="icon" className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg">
+        <Link href="/customers/new">
+          <UserPlus className="h-6 w-6" />
+        </Link>
+      </Button>
+      <ImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} />
     </div>
   );
 }

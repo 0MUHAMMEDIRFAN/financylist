@@ -3,6 +3,7 @@ export type Customer = {
   name: string;
   mobile?: string;
   createdAt: string;
+  isDeleted?: boolean;
 };
 
 export type TransactionType = 'GAVE' | 'GOT';

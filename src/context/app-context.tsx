@@ -11,7 +11,8 @@ import {
   updateDoc, 
   onSnapshot, 
   query, 
-  where 
+  where,
+  writeBatch
 } from 'firebase/firestore';
 
 interface AppContextType {
@@ -19,7 +20,10 @@ interface AppContextType {
   transactions: Transaction[];
   tags: string[];
   addCustomer: (customer: Omit<Customer, 'id' | 'createdAt'>) => Promise<void>;
+  updateCustomer: (customer: Customer) => Promise<void>;
+  deleteCustomer: (customerId: string) => Promise<void>;
   addTransaction: (transaction: Omit<Transaction, 'id' | 'isDeleted' | 'date'>) => Promise<void>;
+  batchAddTransactions: (rows: Array<{ customerName: string; amount: number; type: TransactionType; description: string; tags: string[]; date: string; isRefund: boolean }>) => Promise<void>;
   updateTransaction: (transaction: Transaction) => Promise<void>;
   deleteTransaction: (transactionId: string) => Promise<void>;
   getCustomerById: (id: string) => Customer | undefined;
@@ -59,7 +63,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const customersRef = collection(db, `users/${user.uid}/customers`);
     const unsubscribeCustomers = onSnapshot(customersRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data() as Customer);
+      const data = snapshot.docs.map(doc => doc.data() as Customer).filter(c => !c.isDeleted);
       setCustomers(data);
       customersLoaded = true;
       checkLoaded();
@@ -99,6 +103,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await setDoc(doc(db, `users/${user.uid}/customers`, newId), newCustomer);
   };
 
+  const updateCustomer = async (customer: Customer) => {
+    if (!user) return;
+    await updateDoc(doc(db, `users/${user.uid}/customers`, customer.id), {
+      ...customer
+    });
+  };
+
+  const deleteCustomer = async (customerId: string) => {
+    if (!user) return;
+    await updateDoc(doc(db, `users/${user.uid}/customers`, customerId), {
+      isDeleted: true
+    });
+  };
+
   const addTransaction = async (transactionData: Omit<Transaction, 'id' | 'isDeleted'>) => {
     if (!user) return;
     const newId = `txn_${crypto.randomUUID()}`;
@@ -108,6 +126,70 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isDeleted: false,
     };
     await setDoc(doc(db, `users/${user.uid}/transactions`, newId), newTransaction);
+  };
+
+  const batchAddTransactions = async (rows: Array<{ customerName: string; amount: number; type: TransactionType; description: string; tags: string[]; date: string; isRefund: boolean }>) => {
+    if (!user) return;
+    const batch = writeBatch(db);
+    let operationCount = 0;
+    
+    // Quick helper to commit and reset batch if limit reached (500 limit, let's use 400 to be safe)
+    let currentBatch = batch;
+    const commitBatchIfNeeded = async () => {
+      if (operationCount >= 400) {
+        await currentBatch.commit();
+        currentBatch = writeBatch(db);
+        operationCount = 0;
+      }
+    };
+
+    const customerMap = new Map<string, string>(); // name to ID
+    // Initialize map with existing customers
+    customers.forEach(c => customerMap.set(c.name.toLowerCase().trim(), c.id));
+
+    for (const row of rows) {
+      const nameKey = row.customerName.toLowerCase().trim();
+      let customerId = customerMap.get(nameKey);
+      
+      if (!customerId) {
+        // Create new customer
+        customerId = `cus_${crypto.randomUUID()}`;
+        customerMap.set(nameKey, customerId);
+        
+        const newCustomer: Customer = {
+          name: row.customerName.trim(),
+          id: customerId,
+          createdAt: new Date().toISOString(),
+        };
+        
+        const customerRef = doc(db, `users/${user.uid}/customers`, customerId);
+        currentBatch.set(customerRef, newCustomer);
+        operationCount++;
+        await commitBatchIfNeeded();
+      }
+
+      const newTxnId = `txn_${crypto.randomUUID()}`;
+      const newTransaction: Transaction = {
+        id: newTxnId,
+        customerId,
+        amount: row.amount,
+        type: row.type,
+        description: row.description,
+        tags: row.tags,
+        date: row.date,
+        isRefund: row.isRefund,
+        isDeleted: false,
+      };
+
+      const txnRef = doc(db, `users/${user.uid}/transactions`, newTxnId);
+      currentBatch.set(txnRef, newTransaction);
+      operationCount++;
+      await commitBatchIfNeeded();
+    }
+
+    if (operationCount > 0) {
+      await currentBatch.commit();
+    }
   };
 
   const updateTransaction = async (updatedTransaction: Transaction) => {
@@ -144,7 +226,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     transactions,
     tags,
     addCustomer,
+    updateCustomer,
+    deleteCustomer,
     addTransaction,
+    batchAddTransactions,
     updateTransaction,
     deleteTransaction,
     getCustomerById,
