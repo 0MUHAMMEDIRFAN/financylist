@@ -35,7 +35,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn, formatCurrency } from '@/lib/utils';
-import { Calendar as CalendarIcon, Loader2, Wand2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Loader2, Wand2, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import type { Transaction, TransactionType } from '@/lib/types';
@@ -65,9 +65,10 @@ export function AddTransactionSheet({
   transactionType,
   transactionToEdit,
 }: AddTransactionSheetProps) {
-  const { addTransaction, updateTransaction, getTransactionsByCustomerId, getCustomerById } = useApp();
+  const { addTransaction, updateTransaction, getTransactionsByCustomerId, getCustomerById, tags, addTag } = useApp();
   const customer = getCustomerById(customerId);
   const [isAiPending, startAiTransition] = useTransition();
+  const [newTag, setNewTag] = useState('');
   const { toast } = useToast();
 
   const form = useForm<z.infer<typeof transactionSchema>>({
@@ -114,18 +115,22 @@ export function AddTransactionSheet({
       tags: values.tags?.split(',').map((tag) => tag.trim()).filter(Boolean) || [],
       date: values.date.toISOString(),
       isRefund: values.isRefund,
-      refundOfTransactionId: values.refundOfTransactionId,
+      ...(values.refundOfTransactionId ? { refundOfTransactionId: values.refundOfTransactionId } : {}),
     };
     
-    if (transactionToEdit) {
-        updateTransaction({ ...transactionToEdit, ...transactionData });
-        toast({ title: 'Transaction Updated', description: 'Your transaction has been successfully updated.' });
-    } else {
-        addTransaction(transactionData);
-        toast({ title: 'Transaction Added', description: 'A new transaction has been added.' });
+    try {
+        if (transactionToEdit) {
+            await updateTransaction({ ...transactionToEdit, ...transactionData });
+            toast({ title: 'Transaction Updated', description: 'Your transaction has been successfully updated.' });
+        } else {
+            await addTransaction(transactionData);
+            toast({ title: 'Transaction Added', description: 'A new transaction has been added.' });
+        }
+        setIsOpen(false);
+    } catch (error) {
+        console.error("Error saving transaction:", error);
+        toast({ title: 'Error', description: 'Failed to save transaction.', variant: 'destructive' });
     }
-
-    setIsOpen(false);
   }
 
   const handleAiSuggest = () => {
@@ -171,7 +176,7 @@ export function AddTransactionSheet({
                 <FormItem>
                   <FormLabel>Amount</FormLabel>
                   <FormControl>
-                    <Input type="number" placeholder="0.00" {...field} />
+                    <Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -196,70 +201,39 @@ export function AddTransactionSheet({
                 </FormItem>
               )}
             />
-             <FormField
-              control={form.control}
-              name="tags"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Tags (comma-separated)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. food, office" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="date"
-              render={({ field }) => (
-                <FormItem className="flex flex-col">
-                  <FormLabel>Date</FormLabel>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant={'outline'}
-                          className={cn(
-                            'w-full pl-3 text-left font-normal',
-                            !field.value && 'text-muted-foreground'
-                          )}
-                        >
-                          {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
-                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={field.value}
-                        onSelect={field.onChange}
-                        initialFocus
+
+            <div className="flex flex-wrap gap-4 items-end">
+              <FormField
+                control={form.control}
+                name="date"
+                render={({ field }) => (
+                  <FormItem className="flex-1 min-w-[200px]">
+                    <FormLabel>Date</FormLabel>
+                    <FormControl>
+                      <Input type="date" className="w-full" {...field} value={field.value ? format(field.value, 'yyyy-MM-dd') : ''} onChange={(e) => field.onChange(new Date(e.target.value))} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="isRefund"
+                render={({ field }) => (
+                  <FormItem className="flex flex-1 min-w-[200px] flex-row items-center justify-between rounded-lg border p-3 shadow-sm mt-2 sm:mt-0">
+                    <div className="space-y-0.5">
+                      <FormLabel>Is this a refund?</FormLabel>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
                       />
-                    </PopoverContent>
-                  </Popover>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-             <FormField
-              control={form.control}
-              name="isRefund"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                  <div className="space-y-0.5">
-                    <FormLabel>Is this a refund?</FormLabel>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </div>
             {isRefund && (
               <FormField
                 control={form.control}
@@ -286,8 +260,106 @@ export function AddTransactionSheet({
                 )}
               />
             )}
+            <FormField
+              control={form.control}
+              name="tags"
+              render={({ field }) => {
+                const currentTags = field.value ? field.value.split(',').map(t => t.trim()).filter(Boolean) : [];
+                return (
+                  <FormItem>
+                    <FormLabel>Tags</FormLabel>
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {tags.map((tag) => {
+                        const isSelected = currentTags.includes(tag);
+                        if (!isSelected) return null;
+                        return (
+                          <Button
+                            key={tag}
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="rounded-full h-8"
+                            onClick={() => {
+                              field.onChange(currentTags.filter(t => t !== tag).join(', '));
+                            }}
+                          >
+                            {tag}
+                          </Button>
+                        );
+                      })}
+                      
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="icon" className="h-8 w-8 rounded-full shadow-sm border-dashed">
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64 p-3" align="start">
+                          <div className="space-y-3">
+                            <h4 className="font-medium text-sm">Add Tag</h4>
+                            <div className="flex flex-wrap gap-2">
+                              {tags.filter(t => !currentTags.includes(t)).map(tag => (
+                                <Button
+                                  key={tag}
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-full text-xs h-7"
+                                  onClick={() => field.onChange([...currentTags, tag].join(', '))}
+                                >
+                                  {tag}
+                                </Button>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-2 pt-2 border-t mt-2">
+                              <Input
+                                placeholder="New tag name..."
+                                value={newTag}
+                                onChange={(e) => setNewTag(e.target.value)}
+                                className="h-8 text-sm"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (newTag.trim()) {
+                                      const tagToAdd = newTag.trim();
+                                      addTag(tagToAdd);
+                                      if (!currentTags.includes(tagToAdd)) {
+                                        field.onChange([...currentTags, tagToAdd].join(', '));
+                                      }
+                                      setNewTag('');
+                                    }
+                                  }
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-8"
+                                onClick={() => {
+                                  if (newTag.trim()) {
+                                    const tagToAdd = newTag.trim();
+                                    addTag(tagToAdd);
+                                    if (!currentTags.includes(tagToAdd)) {
+                                      field.onChange([...currentTags, tagToAdd].join(', '));
+                                    }
+                                    setNewTag('');
+                                  }
+                                }}
+                              >
+                                Add
+                              </Button>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                );
+              }}
+            />
             <SheetFooter>
-              <Button type="submit">Save Transaction</Button>
+              <Button type="submit" isLoading={form.formState.isSubmitting}>Save Transaction</Button>
             </SheetFooter>
           </form>
         </Form>

@@ -10,14 +10,21 @@ const Logo = () => (
 );
 
 
-export function Header({ children }: { children?: React.ReactNode }) {
+export function Header({ children, leftNode, title }: { children?: React.ReactNode; leftNode?: React.ReactNode; title?: string }) {
   return (
     <header className="sticky top-0 z-10 w-full bg-background/80 backdrop-blur-sm">
       <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-6">
-        <Link href="/" className="flex items-center gap-2">
-            <Logo />
-            <span className="text-xl font-bold text-primary">Financylist</span>
-        </Link>
+        <div className="flex items-center gap-4">
+            {leftNode}
+            {title ? (
+                <span className="text-xl font-bold text-foreground">{title}</span>
+            ) : (
+                <Link href="/" className="flex items-center gap-2">
+                    <Logo />
+                    <span className="text-xl font-bold text-primary hidden sm:inline-block">Financylist</span>
+                </Link>
+            )}
+        </div>
         <div className="flex items-center gap-2">
             {children}
         </div>
