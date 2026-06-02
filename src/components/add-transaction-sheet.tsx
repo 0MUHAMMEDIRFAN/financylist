@@ -48,13 +48,21 @@ const transactionSchema = z.object({
   date: z.date(),
   isRefund: z.boolean(),
   refundOfTransactionId: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.isRefund && !data.refundOfTransactionId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Original transaction link is required for refunds.',
+      path: ['refundOfTransactionId'],
+    });
+  }
 });
 
 type AddTransactionSheetProps = {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
   customerId: string;
-  transactionType: TransactionType;
+  isGot: boolean;
   transactionToEdit?: Transaction | null;
 };
 
@@ -62,7 +70,7 @@ export function AddTransactionSheet({
   isOpen,
   setIsOpen,
   customerId,
-  transactionType,
+  isGot,
   transactionToEdit,
 }: AddTransactionSheetProps) {
   const { addTransaction, updateTransaction, getTransactionsByCustomerId, getCustomerById, tags, addTag } = useApp();
@@ -101,15 +109,28 @@ export function AddTransactionSheet({
   }, [transactionToEdit, isOpen, form]);
   
   const isRefund = form.watch('isRefund');
-  const typeForRefund = transactionToEdit ? (transactionToEdit.type === 'GAVE' ? 'GOT' : 'GAVE') : (transactionType === 'GAVE' ? 'GOT' : 'GAVE');
+  const amountValue = form.watch('amount');
+  const targetIsGot = transactionToEdit ? !transactionToEdit.isGot : !isGot;
   const refundableTransactions = getTransactionsByCustomerId(customerId).filter(
-    (t) => t.type === typeForRefund
+    (t) => t.isGot === targetIsGot && amountValue !== undefined && Number(t.amount) === Number(amountValue)
   );
 
   async function onSubmit(values: z.infer<typeof transactionSchema>) {
+    if (values.isRefund && values.refundOfTransactionId) {
+      const originalTxn = getTransactionsByCustomerId(customerId).find(t => t.id === values.refundOfTransactionId);
+      if (!originalTxn) {
+        form.setError('refundOfTransactionId', { type: 'manual', message: 'Original transaction not found.' });
+        return;
+      }
+      if (Number(originalTxn.amount) !== Number(values.amount)) {
+        form.setError('refundOfTransactionId', { type: 'manual', message: `Refund amount must match the original transaction amount of ${formatCurrency(originalTxn.amount)}.` });
+        return;
+      }
+    }
+
     const transactionData = {
       customerId,
-      type: transactionToEdit?.type || transactionType,
+      isGot: transactionToEdit?.isGot !== undefined ? transactionToEdit.isGot : isGot,
       amount: values.amount,
       description: values.description || "",
       tags: values.tags?.split(',').map((tag) => tag.trim()).filter(Boolean) || [],
@@ -157,7 +178,7 @@ export function AddTransactionSheet({
     });
   }
 
-  const title = `You will ${transactionType === 'GAVE' ? 'give to' : 'get from'} ${customer?.name || ''}`;
+  const title = `You will ${(transactionToEdit ? transactionToEdit.isGot : isGot) ? 'get from' : 'give to'} ${customer?.name || ''}`;
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>

@@ -97,6 +97,15 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
     }
   };
 
+  const nameValue = form.watch("name");
+
+  const getInitials = (name: string) => {
+    if (!name || !name.trim()) return "?";
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
   return (
     <div className="flex min-h-screen w-full flex-col">
       <Header
@@ -113,6 +122,15 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
         <div className="container mx-auto px-4 py-8 md:px-6 max-w-md">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              
+              {/* Dynamic initials avatar */}
+              <div className="flex flex-col items-center justify-center py-4">
+                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-3xl shadow-sm border border-primary/20 uppercase transition-all duration-300 hover:bg-primary/20">
+                  {getInitials(nameValue)}
+                </div>
+                {nameValue && <span className="text-sm font-semibold mt-2 text-muted-foreground">{nameValue}</span>}
+              </div>
+
               <FormField
                 control={form.control}
                 name="name"

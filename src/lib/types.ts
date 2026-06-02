@@ -12,11 +12,12 @@ export type Transaction = {
   id: string;
   customerId: string;
   amount: number;
-  type: TransactionType;
+  isGot: boolean;
   description: string;
   tags: string[];
   date: string;
   isRefund: boolean;
   refundOfTransactionId?: string;
+  refundedByTransactionId?: string;
   isDeleted: boolean;
 };

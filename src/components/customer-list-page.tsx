@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useApp } from "@/hooks/use-app";
 import { calculateBalance, formatCurrency } from "@/lib/utils";
 import { Header } from "@/components/header";
-import { ImportDialog } from "@/components/import-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -19,7 +18,6 @@ export function CustomerListPage() {
   const { customers, getTransactionsByCustomerId, loading } = useApp();
   const { logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [isImportOpen, setIsImportOpen] = useState(false);
 
   const filteredCustomers = customers.filter((customer) =>
     customer.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -48,9 +46,11 @@ export function CustomerListPage() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setIsImportOpen(true)}>
-              <Upload className="mr-2 h-4 w-4" />
-              Import Data
+            <DropdownMenuItem asChild>
+              <Link href="/import">
+                <Upload className="mr-2 h-4 w-4" />
+                Import Data
+              </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => logout()} className="text-destructive focus:text-destructive">
@@ -151,7 +151,6 @@ export function CustomerListPage() {
           <UserPlus className="h-6 w-6" />
         </Link>
       </Button>
-      <ImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} />
     </div>
   );
 }

@@ -12,7 +12,8 @@ import {
   onSnapshot, 
   query, 
   where,
-  writeBatch
+  writeBatch,
+  deleteField
 } from 'firebase/firestore';
 
 interface AppContextType {
@@ -22,8 +23,8 @@ interface AppContextType {
   addCustomer: (customer: Omit<Customer, 'id' | 'createdAt'>) => Promise<void>;
   updateCustomer: (customer: Customer) => Promise<void>;
   deleteCustomer: (customerId: string) => Promise<void>;
-  addTransaction: (transaction: Omit<Transaction, 'id' | 'isDeleted' | 'date'>) => Promise<void>;
-  batchAddTransactions: (rows: Array<{ customerName: string; amount: number; type: TransactionType; description: string; tags: string[]; date: string; isRefund: boolean }>) => Promise<void>;
+  addTransaction: (transaction: Omit<Transaction, 'id' | 'isDeleted'>) => Promise<void>;
+  batchAddTransactions: (rows: Array<{ customerName: string; amount: number; isGot: boolean; description: string; tags: string[]; date: string; isRefund: boolean }>) => Promise<void>;
   updateTransaction: (transaction: Transaction) => Promise<void>;
   deleteTransaction: (transactionId: string) => Promise<void>;
   getCustomerById: (id: string) => Customer | undefined;
@@ -71,7 +72,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const transactionsRef = collection(db, `users/${user.uid}/transactions`);
     const unsubscribeTransactions = onSnapshot(transactionsRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data() as Transaction);
+      const data = snapshot.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          customerId: d.customerId,
+          amount: Number(d.amount),
+          isGot: typeof d.isGot === 'boolean' ? d.isGot : d.type === 'GOT',
+          description: d.description || "",
+          tags: d.tags || [],
+          date: d.date,
+          isRefund: !!d.isRefund,
+          isDeleted: !!d.isDeleted,
+          refundOfTransactionId: d.refundOfTransactionRef?.id || d.refundOfTransactionId || undefined,
+          refundedByTransactionId: d.refundedByTransactionRef?.id || d.refundedByTransactionId || undefined,
+        } as Transaction;
+      });
       setTransactions(data);
       transactionsLoaded = true;
       checkLoaded();
@@ -120,15 +136,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addTransaction = async (transactionData: Omit<Transaction, 'id' | 'isDeleted'>) => {
     if (!user) return;
     const newId = `txn_${crypto.randomUUID()}`;
-    const newTransaction: Transaction = {
-      ...transactionData,
-      id: newId,
+    
+    const refundOfTransactionRef = transactionData.refundOfTransactionId
+      ? doc(db, `users/${user.uid}/transactions`, transactionData.refundOfTransactionId)
+      : null;
+
+    const newTransactionDoc = {
+      customerId: transactionData.customerId,
+      amount: transactionData.amount,
+      isGot: transactionData.isGot,
+      description: transactionData.description,
+      tags: transactionData.tags,
+      date: transactionData.date,
+      isRefund: transactionData.isRefund,
       isDeleted: false,
+      id: newId,
+      ...(refundOfTransactionRef ? { refundOfTransactionRef } : {}),
     };
-    await setDoc(doc(db, `users/${user.uid}/transactions`, newId), newTransaction);
+
+    await setDoc(doc(db, `users/${user.uid}/transactions`, newId), newTransactionDoc);
+
+    // If this is a refund linked to an original transaction, update the original with a back-reference
+    if (transactionData.isRefund && transactionData.refundOfTransactionId) {
+      await updateDoc(doc(db, `users/${user.uid}/transactions`, transactionData.refundOfTransactionId), {
+        refundedByTransactionRef: doc(db, `users/${user.uid}/transactions`, newId),
+      });
+    }
   };
 
-  const batchAddTransactions = async (rows: Array<{ customerName: string; amount: number; type: TransactionType; description: string; tags: string[]; date: string; isRefund: boolean }>) => {
+  const batchAddTransactions = async (rows: Array<{ customerName: string; amount: number; isGot: boolean; description: string; tags: string[]; date: string; isRefund: boolean }>) => {
     if (!user) return;
     const batch = writeBatch(db);
     let operationCount = 0;
@@ -169,11 +205,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       const newTxnId = `txn_${crypto.randomUUID()}`;
-      const newTransaction: Transaction = {
+      const newTransactionDoc = {
         id: newTxnId,
         customerId,
         amount: row.amount,
-        type: row.type,
+        isGot: row.isGot,
         description: row.description,
         tags: row.tags,
         date: row.date,
@@ -182,7 +218,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
 
       const txnRef = doc(db, `users/${user.uid}/transactions`, newTxnId);
-      currentBatch.set(txnRef, newTransaction);
+      currentBatch.set(txnRef, newTransactionDoc);
       operationCount++;
       await commitBatchIfNeeded();
     }
@@ -194,16 +230,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateTransaction = async (updatedTransaction: Transaction) => {
     if (!user) return;
-    await updateDoc(doc(db, `users/${user.uid}/transactions`, updatedTransaction.id), {
-      ...updatedTransaction
-    });
+    
+    // Get the previous transaction state from local transactions array to see if linking changed
+    const previousTransaction = transactions.find(t => t.id === updatedTransaction.id);
+    
+    const refundOfTransactionRef = updatedTransaction.refundOfTransactionId
+      ? doc(db, `users/${user.uid}/transactions`, updatedTransaction.refundOfTransactionId)
+      : null;
+
+    const transactionDoc = {
+      customerId: updatedTransaction.customerId,
+      amount: updatedTransaction.amount,
+      isGot: updatedTransaction.isGot,
+      description: updatedTransaction.description,
+      tags: updatedTransaction.tags,
+      date: updatedTransaction.date,
+      isRefund: updatedTransaction.isRefund,
+      isDeleted: updatedTransaction.isDeleted,
+      id: updatedTransaction.id,
+      refundOfTransactionRef: refundOfTransactionRef || deleteField(),
+    };
+
+    await updateDoc(doc(db, `users/${user.uid}/transactions`, updatedTransaction.id), transactionDoc);
+
+    // If linking changed, update the original transaction(s)
+    if (previousTransaction) {
+      const prevLink = previousTransaction.refundOfTransactionId;
+      const newLink = updatedTransaction.refundOfTransactionId;
+
+      if (prevLink !== newLink) {
+        // Clean up previous original transaction link
+        if (prevLink) {
+          await updateDoc(doc(db, `users/${user.uid}/transactions`, prevLink), {
+            refundedByTransactionRef: deleteField()
+          });
+        }
+        // Link to the new original transaction
+        if (newLink && updatedTransaction.isRefund) {
+          await updateDoc(doc(db, `users/${user.uid}/transactions`, newLink), {
+            refundedByTransactionRef: doc(db, `users/${user.uid}/transactions`, updatedTransaction.id)
+          });
+        }
+      }
+    }
   };
 
   const deleteTransaction = async (transactionId: string) => {
     if (!user) return;
+    const transaction = transactions.find(t => t.id === transactionId);
+    
     await updateDoc(doc(db, `users/${user.uid}/transactions`, transactionId), {
       isDeleted: true
     });
+
+    if (transaction) {
+      // If deleting a refund transaction, clean up the original transaction link
+      if (transaction.refundOfTransactionId) {
+        await updateDoc(doc(db, `users/${user.uid}/transactions`, transaction.refundOfTransactionId), {
+          refundedByTransactionRef: deleteField()
+        });
+      }
+      // If deleting an original transaction that was refunded, clean up the refund transaction link
+      if (transaction.refundedByTransactionId) {
+        await updateDoc(doc(db, `users/${user.uid}/transactions`, transaction.refundedByTransactionId), {
+          refundOfTransactionRef: deleteField()
+        });
+      }
+    }
   };
   
   const addTag = async (tag: string) => {

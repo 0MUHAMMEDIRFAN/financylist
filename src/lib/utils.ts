@@ -24,7 +24,7 @@ export function calculateBalance(transactions: Transaction[]): number {
   return transactions.reduce((acc, t) => {
     if (t.isDeleted) return acc;
     // Positive balance means you owe them (advance), negative means they owe you (due)
-    if (t.type === 'GOT') {
+    if (t.isGot) {
       return acc + t.amount;
     } else { // 'GAVE'
       return acc - t.amount;

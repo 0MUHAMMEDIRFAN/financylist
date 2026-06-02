@@ -11,7 +11,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, ArrowUpRight, ArrowDownLeft, MoreVertical, Edit, Trash2, FileText } from 'lucide-react';
 import { AddTransactionSheet } from './add-transaction-sheet';
-import { Transaction, TransactionType } from '@/lib/types';
+import { TransactionDetailDialog } from './transaction-detail-dialog';
+import { Transaction } from '@/lib/types';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,16 +35,18 @@ import { useToast } from '@/hooks/use-toast';
 export function CustomerTransactionsPage({ customerId }: { customerId: string }) {
   const { getCustomerById, getTransactionsByCustomerId, deleteTransaction, loading } = useApp();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [transactionType, setTransactionType] = useState<TransactionType>('GAVE');
+  const [isGotState, setIsGotState] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedTxnId, setSelectedTxnId] = useState<string | null>(null);
 
   const customer = getCustomerById(customerId);
   const transactions = getTransactionsByCustomerId(customerId);
   const balance = calculateBalance(transactions);
   const { toast } = useToast();
 
-  const handleAddTransaction = (type: TransactionType) => {
-    setTransactionType(type);
+  const handleAddTransaction = (isGot: boolean) => {
+    setIsGotState(isGot);
     setEditingTransaction(null);
     setSheetOpen(true);
   };
@@ -51,6 +54,11 @@ export function CustomerTransactionsPage({ customerId }: { customerId: string })
   const handleEditTransaction = (transaction: Transaction) => {
     setEditingTransaction(transaction);
     setSheetOpen(true);
+  };
+
+  const handleViewTransaction = (transactionId: string) => {
+    setSelectedTxnId(transactionId);
+    setDetailOpen(true);
   };
   
   const handleDeleteTransaction = (transactionId: string) => {
@@ -192,22 +200,23 @@ export function CustomerTransactionsPage({ customerId }: { customerId: string })
                       <h2 className="mb-1 text-sm font-semibold text-muted-foreground tracking-wider uppercase">{new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</h2>
                       <div className="space-y-2">
                       {txns.map(t => (
-                          <Card key={t.id}>
-                              <CardContent className="p-4 flex items-center justify-between gap-4">
-                                  <div className="flex items-center gap-4">
-                                      <div className={cn("flex h-10 w-10 items-center justify-center rounded-full", t.type === 'GAVE' ? 'bg-destructive/10' : 'bg-positive/10')}>
-                                          {t.type === 'GAVE' ? <ArrowUpRight className="h-5 w-5 text-destructive" /> : <ArrowDownLeft className="h-5 w-5 text-positive" />}
-                                      </div>
-                                      <div>
-                                          <p className="font-semibold">{t.description}</p>
-                                          <p className="text-sm text-muted-foreground">{new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                      </div>
-                                  </div>
-                                  <div className="flex items-center gap-4">
-                                      <p className={cn("font-bold text-lg", t.type === 'GAVE' ? 'text-destructive' : 'text-positive')}>
-                                          {formatCurrency(t.amount)}
-                                      </p>
-                                      <DropdownMenu>
+                           <Card key={t.id} className="cursor-pointer hover:bg-muted/10 transition-colors" onClick={() => handleViewTransaction(t.id)}>
+                               <CardContent className="p-4 flex items-center justify-between gap-4">
+                                   <div className="flex items-center gap-4">
+                                       <div className={cn("flex h-10 w-10 items-center justify-center rounded-full", !t.isGot ? 'bg-destructive/10' : 'bg-positive/10')}>
+                                           {!t.isGot ? <ArrowUpRight className="h-5 w-5 text-destructive" /> : <ArrowDownLeft className="h-5 w-5 text-positive" />}
+                                       </div>
+                                       <div>
+                                           <p className="font-semibold">{t.description}</p>
+                                           <p className="text-sm text-muted-foreground">{new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                       </div>
+                                   </div>
+                                   <div className="flex items-center gap-4">
+                                       <p className={cn("font-bold text-lg", !t.isGot ? 'text-destructive' : 'text-positive')}>
+                                           {formatCurrency(t.amount)}
+                                       </p>
+                                       <div onClick={(e) => e.stopPropagation()}>
+                                           <DropdownMenu>
                                           <DropdownMenuTrigger asChild>
                                               <Button variant="ghost" size="icon" className="h-8 w-8">
                                                   <MoreVertical className="h-4 w-4" />
@@ -240,9 +249,10 @@ export function CustomerTransactionsPage({ customerId }: { customerId: string })
                                               </AlertDialog>
                                           </DropdownMenuContent>
                                       </DropdownMenu>
-                                  </div>
-                              </CardContent>
-                          </Card>
+                                       </div>
+                                   </div>
+                               </CardContent>
+                           </Card>
                       ))}
                       </div>
                   </div>
@@ -254,21 +264,30 @@ export function CustomerTransactionsPage({ customerId }: { customerId: string })
       
       <div className="sticky bottom-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-4 pb-6 mt-auto shadow-[0_-4px_10px_-10px_rgba(0,0,0,0.2)]">
         <div className="container mx-auto grid grid-cols-2 gap-4 max-w-md">
-            <Button size="default" className="bg-destructive hover:bg-destructive/90 text-destructive-foreground" onClick={() => handleAddTransaction('GAVE')}>
-              <ArrowUpRight className="mr-2 h-5 w-5" /> You Gave
-            </Button>
-            <Button size="default" className="bg-positive hover:bg-positive/90 text-positive-foreground" onClick={() => handleAddTransaction('GOT')}>
-              <ArrowDownLeft className="mr-2 h-5 w-5" /> You Got
-            </Button>
-        </div>
-      </div>
-      <AddTransactionSheet
-        isOpen={sheetOpen}
-        setIsOpen={setSheetOpen}
-        customerId={customerId}
-        transactionType={transactionType}
-        transactionToEdit={editingTransaction}
-      />
-    </div>
+             <Button size="default" className="bg-destructive hover:bg-destructive/90 text-destructive-foreground" onClick={() => handleAddTransaction(false)}>
+               <ArrowUpRight className="mr-2 h-5 w-5" /> You Gave
+             </Button>
+             <Button size="default" className="bg-positive hover:bg-positive/90 text-positive-foreground" onClick={() => handleAddTransaction(true)}>
+               <ArrowDownLeft className="mr-2 h-5 w-5" /> You Got
+             </Button>
+         </div>
+       </div>
+       <AddTransactionSheet
+         isOpen={sheetOpen}
+         setIsOpen={setSheetOpen}
+         customerId={customerId}
+         isGot={isGotState}
+         transactionToEdit={editingTransaction}
+       />
+       <TransactionDetailDialog
+         transactionId={selectedTxnId}
+         isOpen={detailOpen}
+         onClose={() => {
+           setDetailOpen(false);
+           setSelectedTxnId(null);
+         }}
+         onEdit={handleEditTransaction}
+       />
+     </div>
   );
 }

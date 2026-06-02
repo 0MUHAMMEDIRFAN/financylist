@@ -39,7 +39,8 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
-      if (!showRefunded && t.isRefund) return false;
+      // When refunds are hidden, exclude both the refund AND the original that was refunded
+      if (!showRefunded && (t.isRefund || t.refundedByTransactionId)) return false;
 
       if (selectedTags.length > 0) {
         if (!t.tags.some(tag => selectedTags.includes(tag))) return false;
@@ -63,8 +64,8 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
   }, [transactions, startDate, endDate, searchTerm, showRefunded, selectedTags]);
 
   const netBalance = calculateBalance(filteredTransactions);
-  const totalGave = filteredTransactions.filter(t => t.type === 'GAVE').reduce((sum, t) => sum + t.amount, 0);
-  const totalGot = filteredTransactions.filter(t => t.type === 'GOT').reduce((sum, t) => sum + t.amount, 0);
+  const totalGave = filteredTransactions.filter(t => !t.isGot).reduce((sum, t) => sum + t.amount, 0);
+  const totalGot = filteredTransactions.filter(t => t.isGot).reduce((sum, t) => sum + t.amount, 0);
 
   const exportExcel = () => {
     if (!customer) return;
@@ -72,7 +73,7 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
       Date: format(new Date(t.date), 'dd/MM/yyyy HH:mm'),
       Description: t.description,
       Tags: t.tags.join(', '),
-      Type: t.type,
+      Type: t.isGot ? 'GOT' : 'GAVE',
       Amount: t.amount,
     }));
     
@@ -90,7 +91,7 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
     const tableData = filteredTransactions.map((t) => [
       format(new Date(t.date), 'dd/MM/yyyy HH:mm'),
       t.description,
-      t.type,
+      t.isGot ? 'GOT' : 'GAVE',
       formatCurrency(t.amount)
     ]);
 
@@ -229,12 +230,12 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
                         <p className="text-xs text-muted-foreground">{format(new Date(t.date), 'dd MMM yyyy, hh:mm a')}</p>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {t.type === 'GOT' ? (
+                        {t.isGot ? (
                           <span className="font-medium text-positive">{formatCurrency(t.amount)}</span>
                         ) : "-"}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {t.type === 'GAVE' ? (
+                        {!t.isGot ? (
                           <span className="font-medium text-destructive">{formatCurrency(t.amount)}</span>
                         ) : "-"}
                       </td>
