@@ -17,7 +17,7 @@ export function formatCurrency(amount: number, currency = 'INR') {
     maximumFractionDigits: 2,
   }).format(absoluteAmount);
 
-  return (isNegative ? '-' : '') + formattedAmount;
+  return formattedAmount;
 }
 
 export function calculateBalance(transactions: Transaction[]): number {

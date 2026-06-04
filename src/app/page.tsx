@@ -1,5 +1,10 @@
-import { CustomerListPage } from '@/components/customer-list-page';
+import { Suspense } from 'react';
+import { AccountListPage } from '@/components/account-list-page';
 
 export default function Home() {
-  return <CustomerListPage />;
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AccountListPage />
+    </Suspense>
+  );
 }

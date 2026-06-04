@@ -1,52 +1,53 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useApp } from '@/hooks/use-app';
 import { calculateBalance, formatCurrency, cn } from '@/lib/utils';
 import { Header } from '@/components/header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Download, FileSpreadsheet, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
-import * as XLSX from 'xlsx';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ArrowLeft, FileSpreadsheet, Download, Search, SlidersHorizontal } from 'lucide-react';
+import { format } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
-export function CustomerReportPage({ customerId }: { customerId: string }) {
-  const { getCustomerById, getTransactionsByCustomerId, loading, tags: availableTags } = useApp();
-  
-  const customer = getCustomerById(customerId);
-  const transactions = getTransactionsByCustomerId(customerId);
-
-  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  const [showRefunded, setShowRefunded] = useState(false);
+export function AccountReportPage({ accountId }: { accountId: string }) {
+  const { getAccountById, getTransactionsByAccountId, tags: availableTags, loading } = useApp();
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showRefunded, setShowRefunded] = useState<boolean>(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
-  const toggleTag = (tag: string) => {
-    setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
-  };
-
-  const activeFilterCount = (showRefunded ? 1 : 0) + (selectedTags.length > 0 ? 1 : 0);
+  const account = getAccountById(accountId);
+  const transactions = getTransactionsByAccountId(accountId);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
-      // When refunds are hidden, exclude both the refund AND the original that was refunded
-      if (!showRefunded && (t.isRefund || t.refundedByTransactionId)) return false;
+      // Exclude deleted transactions
+      if (t.isDeleted) return false;
 
-      if (selectedTags.length > 0) {
-        if (!t.tags.some(tag => selectedTags.includes(tag))) return false;
+      // Exclude refund transactions and their linked originals if showRefunded is off
+      if (!showRefunded && (t.isRefund || t.refundedByTransactionId)) {
+        return false;
       }
-      let matchesDate = true;
+
+      // Filter by selected tags
+      if (selectedTags.length > 0) {
+        const hasMatchingTag = t.tags.some(tag => selectedTags.includes(tag));
+        if (!hasMatchingTag) return false;
+      }
+
+      // Filter by date range
       const tDate = new Date(t.date);
+      let matchesDate = true;
       if (startDate) matchesDate = matchesDate && tDate >= new Date(startDate);
       if (endDate) {
         const end = new Date(endDate);
@@ -54,6 +55,7 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
         matchesDate = matchesDate && tDate <= end;
       }
       
+      // Filter by search text
       let matchesSearch = true;
       if (searchTerm) {
         matchesSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
@@ -68,7 +70,7 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
   const totalGot = filteredTransactions.filter(t => t.isGot).reduce((sum, t) => sum + t.amount, 0);
 
   const exportExcel = () => {
-    if (!customer) return;
+    if (!account) return;
     const data = filteredTransactions.map((t) => ({
       Date: format(new Date(t.date), 'dd/MM/yyyy HH:mm'),
       Description: t.description,
@@ -80,13 +82,13 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Transactions");
-    XLSX.writeFile(wb, `${customer.name}_Report.xlsx`);
+    XLSX.writeFile(wb, `${account.name}_Report.xlsx`);
   };
 
   const exportPDF = () => {
-    if (!customer) return;
+    if (!account) return;
     const doc = new jsPDF();
-    doc.text(`Transaction Report: ${customer.name}`, 14, 15);
+    doc.text(`Transaction Report: ${account.name}`, 14, 15);
     
     const tableData = filteredTransactions.map((t) => [
       format(new Date(t.date), 'dd/MM/yyyy HH:mm'),
@@ -101,45 +103,80 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
       startY: 20,
     });
     
-    doc.save(`${customer.name}_Report.pdf`);
+    doc.save(`${account.name}_Report.pdf`);
   };
 
-  if (loading && !customer) {
+  if (loading && !account) {
     return <div className="flex h-screen items-center justify-center">Loading...</div>;
   }
 
-  if (!customer) {
+  if (!account) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <p className="text-xl text-muted-foreground">Customer not found.</p>
-        <Button asChild variant="link" className="mt-4">
-          <Link href="/">Go Back to Customers</Link>
+      <div className="flex min-h-screen flex-col items-center justify-center p-4 text-center">
+        <h2 className="text-xl font-bold">Account not found</h2>
+        <Button asChild className="mt-4">
+          <Link href="/">Go Back</Link>
         </Button>
       </div>
     );
   }
 
+  const activeFilterCount = selectedTags.length + (showRefunded ? 1 : 0);
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
+  let reportBalanceLabel = "Settled Balance";
+  let reportBalanceColor = "text-muted-foreground";
+
+  if (netBalance > 0) {
+    if (account.type === 'BANK') {
+      reportBalanceLabel = "You will give";
+      reportBalanceColor = "text-positive";
+    } else if (account.isAsset !== false) {
+      reportBalanceLabel = "You got";
+      reportBalanceColor = "text-positive";
+    } else {
+      reportBalanceLabel = "You will give";
+      reportBalanceColor = "text-positive";
+    }
+  } else if (netBalance < 0) {
+    if (account.type === 'SUPPLIER') {
+      reportBalanceLabel = "You gave";
+      reportBalanceColor = "text-destructive";
+    } else {
+      reportBalanceLabel = "You will get";
+      reportBalanceColor = "text-destructive";
+    }
+  }
+
   return (
     <div className="flex min-h-screen w-full flex-col">
       <Header
-        title={`Report - ${customer.name}`}
+        title={account.name}
         leftNode={
           <Button asChild variant="outline" size="icon">
-            <Link href={`/customers/${customerId}`}>
+            <Link href={`/accounts/${accountId}`}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
         }
       />
+      
       <main className="flex-1">
-        <div className="container mx-auto px-4 py-4 md:px-6">
-          
-          <Card className="w-full mb-6 shadow-sm">
-            <CardContent className="flex gap-6 items-center justify-between px-4 py-2">
-              <span className={cn("text-lg font-medium", netBalance > 0 ? "text-destructive" : netBalance < 0 ? "text-positive" : "")}>
-                {netBalance === 0 ? "Settled Up" : netBalance > 0 ? "You will give" : "You will get"}
+        <div className="container mx-auto px-4 py-6 md:px-6">
+          <Card className="w-full mb-6">
+            <CardContent className="flex justify-between items-center py-4 px-4">
+              <span className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
+                {reportBalanceLabel}
               </span>
-              <span className={cn("text-2xl font-bold", netBalance > 0 ? "text-destructive" : netBalance < 0 ? "text-positive" : "text-muted-foreground")}>
+              <span className={cn(
+                "text-xl font-bold",
+                reportBalanceColor
+              )}>
                 {formatCurrency(Math.abs(netBalance))}
               </span>
             </CardContent>
@@ -149,24 +186,37 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
             <div className="flex">
               <div className="flex-1 space-y-2">
                 <Label>From</Label>
-                <Input type="date" className='rounded-tr-none rounded-br-none' value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <Input 
+                  type="date" 
+                  className='rounded-tr-none rounded-br-none' 
+                  value={startDate} 
+                  onChange={(e) => setStartDate(e.target.value)} 
+                  onClick={(e) => { try { e.currentTarget.showPicker(); } catch {} }}
+                />
               </div>
               <div className="flex-1 space-y-2">
                 <Label>To</Label>
-                <Input type="date" className='rounded-tl-none rounded-bl-none' value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <Input 
+                  type="date" 
+                  className='rounded-tl-none rounded-bl-none' 
+                  value={endDate} 
+                  onChange={(e) => setEndDate(e.target.value)} 
+                  onClick={(e) => { try { e.currentTarget.showPicker(); } catch {} }}
+                />
               </div>
             </div>
             <div className="flex gap-2 items-end">
-              <div className="flex-1 space-y-2">
-                <Input placeholder="Search Entries..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search Entries..." className="pl-9" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
               </div>
               
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="mb-[2px] relative">
-                    Filter
+                  <Button variant="outline" size="icon" className="relative h-10 w-10">
+                    <SlidersHorizontal className="h-4 w-4" />
                     {activeFilterCount > 0 && (
-                      <Badge className="ml-2 px-1.5 min-w-[20px] h-5" variant="secondary">
+                      <Badge className="absolute -top-1.5 -right-1.5 px-1.5 min-w-[18px] h-5 rounded-full" variant="secondary">
                         {activeFilterCount}
                       </Badge>
                     )}
@@ -193,10 +243,14 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
                     </div>
                     <div className="border-t pt-4 flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label>Show Refunded</Label>
-                        <p className="text-xs text-muted-foreground">Include refunded transactions.</p>
+                        <Label htmlFor="show-refunded">Show Refunded</Label>
+                        <p className="text-xs text-muted-foreground">Include refunded transactions in calculations</p>
                       </div>
-                      <Switch checked={showRefunded} onCheckedChange={setShowRefunded} />
+                      <Switch 
+                        id="show-refunded" 
+                        checked={showRefunded} 
+                        onCheckedChange={setShowRefunded} 
+                      />
                     </div>
                   </div>
                 </PopoverContent>
@@ -204,17 +258,13 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
             </div>
           </div>
 
-          <div className="rounded-md border overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-muted text-muted-foreground uppercase">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Entry Details</th>
-                  <th className="px-4 py-3 font-medium text-right text-positive">
-                    Get <span className="block text-xs font-bold">{formatCurrency(totalGot)}</span>
-                  </th>
-                  <th className="px-4 py-3 font-medium text-right text-destructive">
-                    Give <span className="block text-xs font-bold">{formatCurrency(totalGave)}</span>
-                  </th>
+          <div className="border rounded-lg overflow-hidden bg-card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/50 border-b text-muted-foreground">
+                  <th className="px-4 py-3 text-left font-medium">Entries</th>
+                  <th className="px-4 py-3 text-right font-medium">Got (IN)</th>
+                  <th className="px-4 py-3 text-right font-medium">Gave (OUT)</th>
                 </tr>
               </thead>
               <tbody>
@@ -226,7 +276,7 @@ export function CustomerReportPage({ customerId }: { customerId: string }) {
                   filteredTransactions.map(t => (
                     <tr key={t.id} className="border-t">
                       <td className="px-4 py-3">
-                        <p className="font-medium text-foreground">{t.description}</p>
+                        <p className="font-medium text-foreground">{t.description || ""}</p>
                         <p className="text-xs text-muted-foreground">{format(new Date(t.date), 'dd MMM yyyy, hh:mm a')}</p>
                       </td>
                       <td className="px-4 py-3 text-right">

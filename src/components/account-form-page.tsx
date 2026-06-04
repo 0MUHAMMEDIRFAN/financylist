@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,6 +17,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -31,42 +38,57 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import type { AccountType } from "@/lib/types";
 
-const customerSchema = z.object({
+const accountSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters."),
   mobile: z.string().optional(),
+  type: z.string({
+    required_error: "Please select an account type.",
+  }).min(1),
 });
 
-export function CustomerFormPage({ customerId }: { customerId?: string }) {
-  const { addCustomer, updateCustomer, deleteCustomer, getCustomerById } = useApp();
+export function AccountFormPage({ accountId }: { accountId?: string }) {
+  const { addAccount, updateAccount, deleteAccount, getAccountById, accountTypes } = useApp();
   const { toast } = useToast();
   const router = useRouter();
 
-  const customerToEdit = customerId ? getCustomerById(customerId) : null;
-  const isEditing = !!customerToEdit;
+  const accountToEdit = accountId ? getAccountById(accountId) : null;
+  const isEditing = !!accountToEdit;
 
-  const form = useForm<z.infer<typeof customerSchema>>({
-    resolver: zodResolver(customerSchema),
+  const form = useForm<z.infer<typeof accountSchema>>({
+    resolver: zodResolver(accountSchema),
     defaultValues: {
-      name: customerToEdit?.name || "",
-      mobile: customerToEdit?.mobile || "",
+      name: accountToEdit?.name || "",
+      mobile: accountToEdit?.mobile || "",
+      type: accountToEdit?.type || "CUSTOMER",
     },
   });
 
-  const onSubmit = async (values: z.infer<typeof customerSchema>) => {
+  useEffect(() => {
+    if (accountToEdit) {
+      form.reset({
+        name: accountToEdit.name,
+        mobile: accountToEdit.mobile || "",
+        type: accountToEdit.type,
+      });
+    }
+  }, [accountToEdit, form]);
+
+  const onSubmit = async (values: z.infer<typeof accountSchema>) => {
     try {
-      if (isEditing && customerToEdit) {
-        await updateCustomer({ ...customerToEdit, ...values });
+      if (isEditing && accountToEdit) {
+        await updateAccount({ ...accountToEdit, ...values });
         toast({
-          title: "Customer Updated",
+          title: "Account Updated",
           description: `${values.name} has been updated successfully.`,
         });
-        router.push(`/customers/${customerToEdit.id}`);
+        router.push(`/accounts/${accountToEdit.id}`);
       } else {
-        await addCustomer(values);
+        await addAccount(values);
         toast({
-          title: "Customer Added",
-          description: `${values.name} has been added to your customer list.`,
+          title: "Account Added",
+          description: `${values.name} has been added successfully.`,
         });
         router.push("/");
       }
@@ -80,18 +102,18 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
   };
 
   const handleDelete = async () => {
-    if (!customerToEdit) return;
+    if (!accountToEdit) return;
     try {
-      await deleteCustomer(customerToEdit.id);
+      await deleteAccount(accountToEdit.id);
       toast({
-        title: "Customer Deleted",
-        description: `${customerToEdit.name} has been removed.`,
+        title: "Account Deleted",
+        description: `${accountToEdit.name} has been removed.`,
       });
       router.push("/");
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to delete customer.",
+        description: "Failed to delete account.",
         variant: "destructive",
       });
     }
@@ -109,10 +131,10 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
   return (
     <div className="flex min-h-screen w-full flex-col">
       <Header
-        title={isEditing ? "Edit Customer" : "Add New Customer"}
+        title={isEditing ? "Edit Account" : "Add New Account"}
         leftNode={
           <Button asChild variant="outline" size="icon">
-            <Link href={isEditing ? `/customers/${customerId}` : "/"}>
+            <Link href={isEditing ? `/accounts/${accountId}` : "/"}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -136,7 +158,7 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Customer Name</FormLabel>
+                    <FormLabel>Account Name</FormLabel>
                     <FormControl>
                       <Input placeholder="e.g. John Doe" {...field} />
                     </FormControl>
@@ -144,6 +166,32 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
                   </FormItem>
                 )}
               />
+
+              <FormField
+                control={form.control}
+                name="type"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Account Type</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {accountTypes.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormField
                 control={form.control}
                 name="mobile"
@@ -157,9 +205,10 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
                   </FormItem>
                 )}
               />
+
               <div className="pt-4">
                 <Button type="submit" className="w-full" isLoading={form.formState.isSubmitting}>
-                  {isEditing ? "Save Changes" : "Save Customer"}
+                  {isEditing ? "Save Changes" : "Save Account"}
                 </Button>
               </div>
             </form>
@@ -170,14 +219,14 @@ export function CustomerFormPage({ customerId }: { customerId?: string }) {
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="destructive" className="w-full">
-                    <Trash2 className="mr-2 h-4 w-4" /> Delete Customer
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete Account
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This will remove the customer from your list. Their transactions will be preserved in the database but hidden. This action cannot be easily undone.
+                      This will remove the account from your list. Their transactions will be preserved in the database but hidden. This action cannot be easily undone.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

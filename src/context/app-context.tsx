@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useState, useEffect, useMemo, type ReactNode } from 'react';
-import type { Customer, Transaction, TransactionType } from '@/lib/types';
+import type { Account, Transaction, TransactionType } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/auth-context';
 import { 
@@ -10,125 +10,207 @@ import {
   setDoc, 
   updateDoc, 
   onSnapshot, 
-  query, 
-  where,
   writeBatch,
   deleteField
 } from 'firebase/firestore';
 
 interface AppContextType {
-  customers: Customer[];
+  accounts: Account[];
   transactions: Transaction[];
   tags: string[];
-  addCustomer: (customer: Omit<Customer, 'id' | 'createdAt'>) => Promise<void>;
-  updateCustomer: (customer: Customer) => Promise<void>;
-  deleteCustomer: (customerId: string) => Promise<void>;
+  accountTypes: Array<{ id: string; name: string; isAsset: boolean }>;
+  addAccount: (account: Omit<Account, 'id' | 'createdAt'>) => Promise<void>;
+  updateAccount: (account: Account) => Promise<void>;
+  deleteAccount: (accountId: string) => Promise<void>;
   addTransaction: (transaction: Omit<Transaction, 'id' | 'isDeleted'>) => Promise<void>;
   batchAddTransactions: (rows: Array<{ customerName: string; amount: number; isGot: boolean; description: string; tags: string[]; date: string; isRefund: boolean }>) => Promise<void>;
   updateTransaction: (transaction: Transaction) => Promise<void>;
   deleteTransaction: (transactionId: string) => Promise<void>;
-  getCustomerById: (id: string) => Customer | undefined;
-  getTransactionsByCustomerId: (customerId: string) => Transaction[];
+  getAccountById: (id: string) => Account | undefined;
+  getTransactionsByAccountId: (accountId: string) => Transaction[];
   addTag: (tag: string) => Promise<void>;
   loading: boolean;
 }
 
+export const defaultTypes = [
+  { id: 'CUSTOMER', name: 'Customer', isAsset: true },
+  { id: 'SUPPLIER', name: 'Supplier', isAsset: false },
+  { id: 'BANK', name: 'Bank', isAsset: true },
+  { id: 'PERSONAL', name: 'Personal', isAsset: false }
+];
+
 export const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [tags, setTags] = useState<string[]>([]);
+  const [rawAccounts, setRawAccounts] = useState<Account[]>([]);
+  const [rawTransactions, setRawTransactions] = useState<any[]>([]);
+  const [tagDocs, setTagDocs] = useState<Array<{ id: string; name: string }>>([]);
+  const [dbAccountTypes, setDbAccountTypes] = useState<Array<{ id: string; name: string; isAsset: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
-      setCustomers([]);
-      setTransactions([]);
-      setTags([]);
-      setLoading(false);
-      return;
-    }
+  const tags = useMemo(() => tagDocs.map(t => t.name), [tagDocs]);
+  const accountTypes = useMemo(() => {
+    return dbAccountTypes.length > 0 ? dbAccountTypes : defaultTypes;
+  }, [dbAccountTypes]);
 
-    let customersLoaded = false;
-    let transactionsLoaded = false;
-    let tagsLoaded = false;
-
-    const checkLoaded = () => {
-      if (customersLoaded && transactionsLoaded && tagsLoaded) {
-        setLoading(false);
-      }
-    };
-
-    const customersRef = collection(db, `users/${user.uid}/customers`);
-    const unsubscribeCustomers = onSnapshot(customersRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data() as Customer).filter(c => !c.isDeleted);
-      setCustomers(data);
-      customersLoaded = true;
-      checkLoaded();
+  // Always derive isAsset from the current type definitions, never trust the stored value
+  const accounts = useMemo(() => {
+    return rawAccounts.map(acc => {
+      const typeDef = accountTypes.find(t => t.id === acc.type) || defaultTypes.find(t => t.id === acc.type);
+      return {
+        ...acc,
+        isAsset: typeDef ? typeDef.isAsset : false,
+      };
     });
+  }, [rawAccounts, accountTypes]);
 
-    const transactionsRef = collection(db, `users/${user.uid}/transactions`);
-    const unsubscribeTransactions = onSnapshot(transactionsRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => {
-        const d = doc.data();
-        return {
-          id: doc.id,
-          customerId: d.customerId,
-          amount: Number(d.amount),
-          isGot: typeof d.isGot === 'boolean' ? d.isGot : d.type === 'GOT',
-          description: d.description || "",
-          tags: d.tags || [],
-          date: d.date,
-          isRefund: !!d.isRefund,
-          isDeleted: !!d.isDeleted,
-          refundOfTransactionId: d.refundOfTransactionRef?.id || d.refundOfTransactionId || undefined,
-          refundedByTransactionId: d.refundedByTransactionRef?.id || d.refundedByTransactionId || undefined,
-        } as Transaction;
+  const transactions = useMemo(() => {
+    return rawTransactions.map(t => {
+      // Resolve tag references to tag name strings
+      const resolvedTags = (t.tagRefs || []).map((ref: any) => {
+        const match = tagDocs.find(td => td.id === ref.id);
+        return match ? match.name : ref.id;
       });
-      setTransactions(data);
-      transactionsLoaded = true;
-      checkLoaded();
+      return {
+        ...t,
+        tags: resolvedTags.length > 0 ? resolvedTags : (t.tags || []),
+      } as Transaction;
     });
-    
-    const tagsRef = collection(db, `users/${user.uid}/tags`);
-    const unsubscribeTags = onSnapshot(tagsRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => doc.data().name as string);
-      setTags(data);
-      tagsLoaded = true;
-      checkLoaded();
-    });
+  }, [rawTransactions, tagDocs]);
 
-    return () => {
-      unsubscribeCustomers();
-      unsubscribeTransactions();
-      unsubscribeTags();
-    };
-  }, [user, authLoading]);
+    useEffect(() => {
+      if (authLoading) return;
+      if (!user) {
+        setRawAccounts([]);
+        setRawTransactions([]);
+        setTagDocs([]);
+        setDbAccountTypes([]);
+        setLoading(false);
+        return;
+      }
 
-  const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt'>) => {
+      let accountsLoaded = false;
+      let transactionsLoaded = false;
+      let tagsLoaded = false;
+      let typesLoaded = false;
+
+      const checkLoaded = () => {
+        if (accountsLoaded && transactionsLoaded && tagsLoaded && typesLoaded) {
+          setLoading(false);
+        }
+      };
+
+      const accountsRef = collection(db, `users/${user.uid}/accounts`);
+      const unsubscribeAccounts = onSnapshot(accountsRef, (snapshot) => {
+        const data = snapshot.docs.map(doc => {
+          const d = doc.data() as Account;
+          return { ...d };
+        }).filter(c => !c.isDeleted);
+        setRawAccounts(data);
+        accountsLoaded = true;
+        checkLoaded();
+      });
+
+      const transactionsRef = collection(db, `users/${user.uid}/transactions`);
+      const unsubscribeTransactions = onSnapshot(transactionsRef, (snapshot) => {
+        const data = snapshot.docs.map(doc => {
+          const d = doc.data();
+          return {
+            id: doc.id,
+            accountId: d.accountId || d.customerId, // Handle renaming legacy customerId
+            amount: Number(d.amount),
+            isGot: typeof d.isGot === 'boolean' ? d.isGot : d.type === 'GOT',
+            description: d.description || "",
+            tagRefs: d.tagRefs || [],
+            tags: d.tags || [],
+            date: d.date,
+            isRefund: !!d.isRefund,
+            isDeleted: !!d.isDeleted,
+            refundOfTransactionId: d.refundOfTransactionRef?.id || d.refundOfTransactionId || undefined,
+            refundedByTransactionId: d.refundedByTransactionRef?.id || d.refundedByTransactionId || undefined,
+          };
+        });
+        setRawTransactions(data);
+        transactionsLoaded = true;
+        checkLoaded();
+      });
+      
+      const tagsRef = collection(db, `users/${user.uid}/tags`);
+      const unsubscribeTags = onSnapshot(tagsRef, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          name: doc.data().name as string
+        }));
+        setTagDocs(data);
+        tagsLoaded = true;
+        checkLoaded();
+      });
+
+      const typesRef = collection(db, `users/${user.uid}/types`);
+      const unsubscribeTypes = onSnapshot(typesRef, (snapshot) => {
+        const data = snapshot.docs.map(doc => {
+          const d = doc.data();
+          const knownDefault = defaultTypes.find(dt => dt.id === doc.id || dt.id === (d.name as string)?.toUpperCase());
+          // Use explicit isAsset from Firestore if it's a boolean, otherwise fall back to known default
+          let isAsset: boolean;
+          if (typeof d.isAsset === 'boolean') {
+            isAsset = d.isAsset;
+          } else if (knownDefault) {
+            isAsset = knownDefault.isAsset;
+          } else {
+            isAsset = false; // Unknown types default to liability (safe default)
+          }
+          return {
+            id: doc.id,
+            name: d.name as string,
+            isAsset
+          };
+        });
+        setDbAccountTypes(data);
+        typesLoaded = true;
+        checkLoaded();
+      });
+
+      return () => {
+        unsubscribeAccounts();
+        unsubscribeTransactions();
+        unsubscribeTags();
+        unsubscribeTypes();
+      };
+    }, [user, authLoading]);
+
+  const addAccount = async (accountData: Omit<Account, 'id' | 'createdAt'>) => {
     if (!user) return;
-    const newId = `cus_${crypto.randomUUID()}`;
-    const newCustomer: Customer = {
-      ...customerData,
+    const newId = `acc_${crypto.randomUUID()}`;
+    
+    const selectedType = accountTypes.find(t => t.id === accountData.type) || defaultTypes.find(t => t.id === accountData.type);
+    const isAsset = selectedType ? selectedType.isAsset : true;
+
+    const newAccount: Account = {
+      ...accountData,
+      isAsset,
       id: newId,
       createdAt: new Date().toISOString(),
     };
-    await setDoc(doc(db, `users/${user.uid}/customers`, newId), newCustomer);
+    await setDoc(doc(db, `users/${user.uid}/accounts`, newId), newAccount);
   };
 
-  const updateCustomer = async (customer: Customer) => {
+  const updateAccount = async (account: Account) => {
     if (!user) return;
-    await updateDoc(doc(db, `users/${user.uid}/customers`, customer.id), {
-      ...customer
+    
+    const selectedType = accountTypes.find(t => t.id === account.type) || defaultTypes.find(t => t.id === account.type);
+    const isAsset = selectedType ? selectedType.isAsset : true;
+
+    await updateDoc(doc(db, `users/${user.uid}/accounts`, account.id), {
+      ...account,
+      isAsset
     });
   };
 
-  const deleteCustomer = async (customerId: string) => {
+  const deleteAccount = async (accountId: string) => {
     if (!user) return;
-    await updateDoc(doc(db, `users/${user.uid}/customers`, customerId), {
+    await updateDoc(doc(db, `users/${user.uid}/accounts`, accountId), {
       isDeleted: true
     });
   };
@@ -141,12 +223,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ? doc(db, `users/${user.uid}/transactions`, transactionData.refundOfTransactionId)
       : null;
 
+    // Resolve tags to DocumentReferences in Firestore
+    const tagRefs = await Promise.all((transactionData.tags || []).map(async (tagName) => {
+      const cleanName = tagName.trim();
+      let match = tagDocs.find(t => t.name.toLowerCase() === cleanName.toLowerCase());
+      let tagId = match?.id;
+      if (!tagId) {
+        tagId = `tag_${crypto.randomUUID()}`;
+        await setDoc(doc(db, `users/${user.uid}/tags`, tagId), { name: cleanName, id: tagId });
+      }
+      return doc(db, `users/${user.uid}/tags`, tagId);
+    }));
+
     const newTransactionDoc = {
-      customerId: transactionData.customerId,
+      accountId: transactionData.accountId,
       amount: transactionData.amount,
       isGot: transactionData.isGot,
       description: transactionData.description,
-      tags: transactionData.tags,
+      tagRefs,
       date: transactionData.date,
       isRefund: transactionData.isRefund,
       isDeleted: false,
@@ -169,7 +263,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const batch = writeBatch(db);
     let operationCount = 0;
     
-    // Quick helper to commit and reset batch if limit reached (500 limit, let's use 400 to be safe)
     let currentBatch = batch;
     const commitBatchIfNeeded = async () => {
       if (operationCount >= 400) {
@@ -179,39 +272,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const customerMap = new Map<string, string>(); // name to ID
-    // Initialize map with existing customers
-    customers.forEach(c => customerMap.set(c.name.toLowerCase().trim(), c.id));
+    const accountMap = new Map<string, string>(); // name to ID
+    accounts.forEach(c => accountMap.set(c.name.toLowerCase().trim(), c.id));
 
     for (const row of rows) {
       const nameKey = row.customerName.toLowerCase().trim();
-      let customerId = customerMap.get(nameKey);
+      let accountId = accountMap.get(nameKey);
       
-      if (!customerId) {
-        // Create new customer
-        customerId = `cus_${crypto.randomUUID()}`;
-        customerMap.set(nameKey, customerId);
+      if (!accountId) {
+        // Create new account as CUSTOMER by default
+        accountId = `acc_${crypto.randomUUID()}`;
+        accountMap.set(nameKey, accountId);
         
-        const newCustomer: Customer = {
+        const newAccount: Account = {
           name: row.customerName.trim(),
-          id: customerId,
+          id: accountId,
+          type: 'CUSTOMER',
           createdAt: new Date().toISOString(),
         };
         
-        const customerRef = doc(db, `users/${user.uid}/customers`, customerId);
-        currentBatch.set(customerRef, newCustomer);
+        const accountRef = doc(db, `users/${user.uid}/accounts`, accountId);
+        currentBatch.set(accountRef, newAccount);
         operationCount++;
         await commitBatchIfNeeded();
       }
 
+      // Resolve tag references in batch (safely creating tag docs)
+      const tagRefs = await Promise.all((row.tags || []).map(async (tagName) => {
+        const cleanName = tagName.trim();
+        let match = tagDocs.find(t => t.name.toLowerCase() === cleanName.toLowerCase());
+        let tagId = match?.id;
+        if (!tagId) {
+          tagId = `tag_${crypto.randomUUID()}`;
+          const tagDocRef = doc(db, `users/${user.uid}/tags`, tagId);
+          await setDoc(tagDocRef, { name: cleanName, id: tagId });
+        }
+        return doc(db, `users/${user.uid}/tags`, tagId);
+      }));
+
       const newTxnId = `txn_${crypto.randomUUID()}`;
       const newTransactionDoc = {
         id: newTxnId,
-        customerId,
+        accountId,
         amount: row.amount,
         isGot: row.isGot,
         description: row.description,
-        tags: row.tags,
+        tagRefs,
         date: row.date,
         isRefund: row.isRefund,
         isDeleted: false,
@@ -231,19 +337,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateTransaction = async (updatedTransaction: Transaction) => {
     if (!user) return;
     
-    // Get the previous transaction state from local transactions array to see if linking changed
     const previousTransaction = transactions.find(t => t.id === updatedTransaction.id);
     
     const refundOfTransactionRef = updatedTransaction.refundOfTransactionId
       ? doc(db, `users/${user.uid}/transactions`, updatedTransaction.refundOfTransactionId)
       : null;
 
+    // Resolve tag references in updates
+    const tagRefs = await Promise.all((updatedTransaction.tags || []).map(async (tagName) => {
+      const cleanName = tagName.trim();
+      let match = tagDocs.find(t => t.name.toLowerCase() === cleanName.toLowerCase());
+      let tagId = match?.id;
+      if (!tagId) {
+        tagId = `tag_${crypto.randomUUID()}`;
+        await setDoc(doc(db, `users/${user.uid}/tags`, tagId), { name: cleanName, id: tagId });
+      }
+      return doc(db, `users/${user.uid}/tags`, tagId);
+    }));
+
     const transactionDoc = {
-      customerId: updatedTransaction.customerId,
+      accountId: updatedTransaction.accountId,
       amount: updatedTransaction.amount,
       isGot: updatedTransaction.isGot,
       description: updatedTransaction.description,
-      tags: updatedTransaction.tags,
+      tagRefs,
       date: updatedTransaction.date,
       isRefund: updatedTransaction.isRefund,
       isDeleted: updatedTransaction.isDeleted,
@@ -300,36 +417,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
   
   const addTag = async (tag: string) => {
-      if (!user) return;
-      if (tags.includes(tag)) return;
-      const newId = `tag_${crypto.randomUUID()}`;
-      await setDoc(doc(db, `users/${user.uid}/tags`, newId), { name: tag, id: newId });
-  }
-
-  const getCustomerById = (id: string) => {
-    return customers.find((c) => c.id === id);
+    if (!user) return;
+    if (tags.includes(tag)) return;
+    const newId = `tag_${crypto.randomUUID()}`;
+    await setDoc(doc(db, `users/${user.uid}/tags`, newId), { name: tag, id: newId });
   };
 
-  const getTransactionsByCustomerId = (customerId: string) => {
-    return transactions.filter((t) => t.customerId === customerId && !t.isDeleted).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const getAccountById = (id: string) => {
+    return accounts.find((c) => c.id === id);
+  };
+
+  const getTransactionsByAccountId = (accountId: string) => {
+    return transactions.filter((t) => t.accountId === accountId && !t.isDeleted).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
 
   const contextValue = useMemo(() => ({
-    customers,
+    accounts,
     transactions,
     tags,
-    addCustomer,
-    updateCustomer,
-    deleteCustomer,
+    accountTypes,
+    addAccount,
+    updateAccount,
+    deleteAccount,
     addTransaction,
     batchAddTransactions,
     updateTransaction,
     deleteTransaction,
-    getCustomerById,
-    getTransactionsByCustomerId,
+    getAccountById,
+    getTransactionsByAccountId,
     addTag,
     loading,
-  }), [customers, transactions, tags, user, loading]);
+  }), [accounts, transactions, tags, accountTypes, user, loading]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
 }

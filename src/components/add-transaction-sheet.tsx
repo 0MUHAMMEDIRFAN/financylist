@@ -33,15 +33,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
 import { cn, formatCurrency } from '@/lib/utils';
 import { Calendar as CalendarIcon, Loader2, Wand2, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import type { Transaction, TransactionType } from '@/lib/types';
+import type { Transaction } from '@/lib/types';
 import { suggestTransactionDetails } from '@/ai/flows/suggest-transaction-details';
 
 const transactionSchema = z.object({
+  selectedAccountId: z.string().optional(),
   amount: z.coerce.number().positive('Amount must be positive.'),
   description: z.string().optional(),
   tags: z.string().optional(),
@@ -61,20 +61,25 @@ const transactionSchema = z.object({
 type AddTransactionSheetProps = {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
-  customerId: string;
+  accountId?: string;
   isGot: boolean;
   transactionToEdit?: Transaction | null;
+  preselectedTag?: string;
 };
 
 export function AddTransactionSheet({
   isOpen,
   setIsOpen,
-  customerId,
+  accountId,
   isGot,
   transactionToEdit,
+  preselectedTag,
 }: AddTransactionSheetProps) {
-  const { addTransaction, updateTransaction, getTransactionsByCustomerId, getCustomerById, tags, addTag } = useApp();
-  const customer = getCustomerById(customerId);
+  const { addTransaction, updateTransaction, getTransactionsByAccountId, getAccountById, tags, addTag, accounts } = useApp();
+  
+  const activeAccountId = accountId || (transactionToEdit?.accountId);
+  const account = activeAccountId ? getAccountById(activeAccountId) : null;
+
   const [isAiPending, startAiTransition] = useTransition();
   const [newTag, setNewTag] = useState('');
   const { toast } = useToast();
@@ -89,6 +94,7 @@ export function AddTransactionSheet({
   useEffect(() => {
     if (transactionToEdit) {
       form.reset({
+        selectedAccountId: transactionToEdit.accountId,
         amount: transactionToEdit.amount,
         description: transactionToEdit.description,
         tags: transactionToEdit.tags.join(', '),
@@ -98,26 +104,48 @@ export function AddTransactionSheet({
       });
     } else {
       form.reset({
+        selectedAccountId: accountId || '',
         amount: undefined,
         description: '',
-        tags: '',
+        tags: preselectedTag || '',
         date: new Date(),
         isRefund: false,
         refundOfTransactionId: undefined,
       });
     }
-  }, [transactionToEdit, isOpen, form]);
+  }, [transactionToEdit, isOpen, form, accountId, preselectedTag]);
   
   const isRefund = form.watch('isRefund');
   const amountValue = form.watch('amount');
+  const selectedAccountIdValue = form.watch('selectedAccountId');
+  
+  const finalAccountId = accountId || selectedAccountIdValue;
+
   const targetIsGot = transactionToEdit ? !transactionToEdit.isGot : !isGot;
-  const refundableTransactions = getTransactionsByCustomerId(customerId).filter(
-    (t) => t.isGot === targetIsGot && amountValue !== undefined && Number(t.amount) === Number(amountValue)
-  );
+  
+  // Filter refundable transactions:
+  // - Same account
+  // - Opposite transaction type
+  // - Matching amount
+  // - Not already refunded (except if it is the one currently linked to this editing transaction)
+  const refundableTransactions = finalAccountId
+    ? getTransactionsByAccountId(finalAccountId).filter(
+        (t) => t.isGot === targetIsGot && 
+               amountValue !== undefined && 
+               Number(t.amount) === Number(amountValue) &&
+               (!t.refundedByTransactionId || t.refundedByTransactionId === transactionToEdit?.id)
+      )
+    : [];
 
   async function onSubmit(values: z.infer<typeof transactionSchema>) {
+    const submitAccountId = accountId || values.selectedAccountId;
+    if (!submitAccountId) {
+      form.setError('selectedAccountId', { type: 'manual', message: 'Please select an account.' });
+      return;
+    }
+
     if (values.isRefund && values.refundOfTransactionId) {
-      const originalTxn = getTransactionsByCustomerId(customerId).find(t => t.id === values.refundOfTransactionId);
+      const originalTxn = getTransactionsByAccountId(submitAccountId).find(t => t.id === values.refundOfTransactionId);
       if (!originalTxn) {
         form.setError('refundOfTransactionId', { type: 'manual', message: 'Original transaction not found.' });
         return;
@@ -129,7 +157,7 @@ export function AddTransactionSheet({
     }
 
     const transactionData = {
-      customerId,
+      accountId: submitAccountId,
       isGot: transactionToEdit?.isGot !== undefined ? transactionToEdit.isGot : isGot,
       amount: values.amount,
       description: values.description || "",
@@ -156,14 +184,15 @@ export function AddTransactionSheet({
 
   const handleAiSuggest = () => {
     const amount = form.getValues('amount');
-    if (!amount || !customer) return;
+    const suggestCustomer = account || (selectedAccountIdValue ? getAccountById(selectedAccountIdValue) : null);
+    if (!amount || !suggestCustomer) return;
 
     startAiTransition(async () => {
         try {
             const result = await suggestTransactionDetails({
                 amount: amount,
-                customerName: customer.name,
-                customerMobile: customer.mobile
+                customerName: suggestCustomer.name,
+                customerMobile: suggestCustomer.mobile
             });
             if (result.description) form.setValue('description', result.description, { shouldValidate: true });
             if (result.tags) form.setValue('tags', result.tags.join(', '));
@@ -178,7 +207,29 @@ export function AddTransactionSheet({
     });
   }
 
-  const title = `You will ${(transactionToEdit ? transactionToEdit.isGot : isGot) ? 'get from' : 'give to'} ${customer?.name || ''}`;
+  // Dynamic Wording calculation:
+  // - If accountId is provided, use "You will get from Ramesh" or "You will give to Ramesh"
+  // - If accountId is NOT provided (generic/tag context), use "You spend" / "You spent" (GAVE) or "You got" / "You received" (GOT)
+  const isGotVal = transactionToEdit ? transactionToEdit.isGot : isGot;
+  const targetAccount = account || (selectedAccountIdValue ? getAccountById(selectedAccountIdValue) : null);
+
+  const getDynamicTitle = () => {
+    if (!targetAccount) {
+      return isGotVal ? "You Added" : "You Spent";
+    }
+    const type = targetAccount.type;
+    const name = targetAccount.name;
+    if (type === 'BANK') {
+      return isGotVal ? `Withdraw from ${name}` : `Deposit to ${name}`;
+    } else if (type === 'CUSTOMER') {
+      return isGotVal ? `You Added to ${name}` : `You Gave to ${name}`;
+    } else if (type === 'SUPPLIER') {
+      return isGotVal ? `You Got from ${name}` : `You Gave to ${name}`;
+    } else { // PERSONAL
+      return isGotVal ? `You Got from ${name}` : `You Gave to ${name}`;
+    }
+  };
+  const title = getDynamicTitle();
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -188,6 +239,35 @@ export function AddTransactionSheet({
         </SheetHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 py-6">
+            
+            {/* Account Selector if launched from generic/tag view */}
+            {!accountId && (
+              <FormField
+                control={form.control}
+                name="selectedAccountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Account</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pick an account..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {accounts.map((acc) => (
+                          <SelectItem key={acc.id} value={acc.id}>
+                            {acc.name} ({acc.type.toLowerCase()})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
             <FormField
               control={form.control}
               name="amount"
@@ -201,24 +281,28 @@ export function AddTransactionSheet({
                 </FormItem>
               )}
             />
-             <FormField
+            
+            <FormField
               control={form.control}
               name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center justify-between">
-                    <FormLabel>Description</FormLabel>
-                    <Button type="button" variant="outline" size="sm" onClick={handleAiSuggest} disabled={isAiPending || !form.watch('amount')}>
-                      {isAiPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                      Suggest
-                    </Button>
-                  </div>
-                  <FormControl>
-                    <Textarea placeholder="e.g. Paid for lunch" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
+              render={({ field }) => {
+                const isSuggestDisabled = isAiPending || !form.watch('amount') || (!accountId && !selectedAccountIdValue);
+                return (
+                  <FormItem>
+                    <div className="flex items-center justify-between">
+                      <FormLabel>Description</FormLabel>
+                      <Button type="button" variant="outline" size="sm" onClick={handleAiSuggest} disabled={isSuggestDisabled}>
+                        {isAiPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                        Suggest
+                      </Button>
+                    </div>
+                    <FormControl>
+                      <Textarea placeholder="e.g. Paid for lunch" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                );
+              }}
             />
 
             <div className="flex flex-row gap-4 items-end">
@@ -229,7 +313,20 @@ export function AddTransactionSheet({
                   <FormItem className="flex-1">
                     <FormLabel>Date</FormLabel>
                     <FormControl>
-                      <Input type="date" className="w-full" {...field} value={field.value ? format(field.value, 'yyyy-MM-dd') : ''} onChange={(e) => field.onChange(new Date(e.target.value))} />
+                      <Input 
+                        type="date" 
+                        className="w-full" 
+                        {...field} 
+                        value={field.value ? format(field.value, 'yyyy-MM-dd') : ''} 
+                        onChange={(e) => field.onChange(new Date(e.target.value))} 
+                        onClick={(e) => {
+                          try {
+                            e.currentTarget.showPicker();
+                          } catch (err) {
+                            console.log("showPicker not supported", err);
+                          }
+                        }}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -253,6 +350,7 @@ export function AddTransactionSheet({
                 )}
               />
             </div>
+
             {isRefund && (
               <FormField
                 control={form.control}
@@ -267,11 +365,17 @@ export function AddTransactionSheet({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {refundableTransactions.map((t) => (
-                           <SelectItem key={t.id} value={t.id}>
-                             {format(new Date(t.date), 'dd MMM yyyy')} - {t.description} ({formatCurrency(t.amount)})
-                           </SelectItem>
-                        ))}
+                        {refundableTransactions.length === 0 ? (
+                          <SelectItem value="_empty" disabled>
+                            -- No matching unrefunded transactions found --
+                          </SelectItem>
+                        ) : (
+                          refundableTransactions.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {format(new Date(t.date), 'dd MMM yyyy')} - {t.description || ""} ({formatCurrency(t.amount)})
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -279,6 +383,7 @@ export function AddTransactionSheet({
                 )}
               />
             )}
+
             <FormField
               control={form.control}
               name="tags"

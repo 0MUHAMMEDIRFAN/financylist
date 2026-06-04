@@ -23,11 +23,11 @@ import Link from "next/link";
 type FieldMapping = {
   source: string; // "__skip__" | "__custom__" | column_header
   customValue?: string;
-  customCustomerId?: string; // For customer field: pick from existing list
+  customAccountId?: string; // For account field: pick from existing list
 };
 
 type MappingState = {
-  customerName: FieldMapping;
+  accountName: FieldMapping;
   amount: FieldMapping;
   type: FieldMapping;
   description: FieldMapping;
@@ -36,7 +36,7 @@ type MappingState = {
 };
 
 const defaultMapping: MappingState = {
-  customerName: { source: "__skip__" },
+  accountName: { source: "__skip__" },
   amount: { source: "__skip__" },
   type: { source: "__skip__" },
   description: { source: "__skip__" },
@@ -45,7 +45,7 @@ const defaultMapping: MappingState = {
 };
 
 const fieldDefinitions = [
-  { key: "customerName", label: "Customer Name", required: true },
+  { key: "accountName", label: "Account Name", required: true },
   { key: "amount", label: "Amount", required: true },
   { key: "type", label: "Type (Gave/Got)", required: false },
   { key: "date", label: "Date & Time", required: false },
@@ -54,7 +54,7 @@ const fieldDefinitions = [
 ];
 
 export default function ImportPage() {
-  const { batchAddTransactions, customers } = useApp();
+  const { batchAddTransactions, accounts } = useApp();
   const { toast } = useToast();
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -88,8 +88,8 @@ export default function ImportPage() {
         const newMapping = { ...defaultMapping };
         extractedHeaders.forEach((h) => {
           const lower = h.toLowerCase();
-          if (lower.includes("name") || lower.includes("customer"))
-            newMapping.customerName = { source: h };
+          if (lower.includes("name") || lower.includes("customer") || lower.includes("account"))
+            newMapping.accountName = { source: h };
           if (lower.includes("amount") || lower.includes("rs") || lower.includes("price"))
             newMapping.amount = { source: h };
           if (lower.includes("type") || lower.includes("gave") || lower.includes("got"))
@@ -118,15 +118,15 @@ export default function ImportPage() {
   };
 
   const handleImport = async () => {
-    const cm = mapping.customerName;
+    const cm = mapping.accountName;
     const am = mapping.amount;
 
     if (cm.source === "__skip__") {
-      toast({ title: "Missing Mapping", description: "Customer Name mapping is required.", variant: "destructive" });
+      toast({ title: "Missing Mapping", description: "Account Name mapping is required.", variant: "destructive" });
       return;
     }
-    if (cm.source === "__custom__" && !cm.customCustomerId) {
-      toast({ title: "Missing Customer", description: "Please select a custom customer.", variant: "destructive" });
+    if (cm.source === "__custom__" && !cm.customAccountId) {
+      toast({ title: "Missing Account", description: "Please select a custom account.", variant: "destructive" });
       return;
     }
     if (am.source === "__skip__") {
@@ -145,8 +145,8 @@ export default function ImportPage() {
           // Customer Name
           let customerName = "";
           if (cm.source === "__custom__") {
-            if (cm.customCustomerId) {
-              const cust = customers.find((c) => c.id === cm.customCustomerId);
+            if (cm.customAccountId) {
+              const cust = accounts.find((c) => c.id === cm.customAccountId);
               customerName = cust?.name || "";
             }
           } else {
@@ -245,7 +245,7 @@ export default function ImportPage() {
       <main className="flex-1">
         <div className="container mx-auto px-4 py-8 md:px-6 max-w-lg">
           <p className="text-sm text-muted-foreground mb-6">
-            Upload a CSV or Excel file to import transactions. If a customer doesn&apos;t exist, they will be created automatically.
+            Upload a CSV or Excel file to import transactions. If an account doesn&apos;t exist, they will be created automatically.
           </p>
 
           {/* File Upload */}
@@ -304,7 +304,6 @@ export default function ImportPage() {
                             updateFieldMapping(field.key, {
                               source: val,
                               customValue: undefined,
-                              customCustomerId: undefined,
                             })
                           }
                         >
@@ -318,7 +317,9 @@ export default function ImportPage() {
                                 {h}
                               </SelectItem>
                             ))}
-                            <SelectItem value="__custom__">-- Custom --</SelectItem>
+                            {field.key !== "tags" && (
+                              <SelectItem value="__custom__">-- Custom --</SelectItem>
+                            )}
                           </SelectContent>
                         </Select>
                       </div>
@@ -326,20 +327,20 @@ export default function ImportPage() {
 
                       {fm.source === "__custom__" && (
                         <div className="pt-1">
-                          {field.key === "customerName" ? (
+                          {field.key === "accountName" ? (
                             <Select
-                              value={fm.customCustomerId || ""}
+                              value={fm.customAccountId || ""}
                               onValueChange={(val) =>
                                 updateFieldMapping(field.key, {
-                                  customCustomerId: val,
+                                  customAccountId: val,
                                 })
                               }
                             >
                               <SelectTrigger>
-                                <SelectValue placeholder="Pick existing customer..." />
+                                <SelectValue placeholder="Pick existing account..." />
                               </SelectTrigger>
                               <SelectContent>
-                                {customers.map((c) => (
+                                {accounts.map((c) => (
                                   <SelectItem key={c.id} value={c.id}>
                                     {c.name}
                                   </SelectItem>

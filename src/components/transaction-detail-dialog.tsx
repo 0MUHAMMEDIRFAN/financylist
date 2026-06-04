@@ -11,13 +11,26 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn, formatCurrency } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { 
   Calendar, 
   Tag, 
   Clock, 
   ArrowRight,
   Sparkles,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Trash2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import type { Transaction } from '@/lib/types';
@@ -35,8 +48,9 @@ export function TransactionDetailDialog({
   onClose,
   onEdit,
 }: TransactionDetailDialogProps) {
-  const { transactions, getCustomerById } = useApp();
+  const { transactions, getAccountById, deleteTransaction } = useApp();
   const [currentId, setCurrentId] = useState<string | null>(transactionId);
+  const { toast } = useToast();
 
   useEffect(() => {
     setCurrentId(transactionId);
@@ -47,7 +61,7 @@ export function TransactionDetailDialog({
   const txn = transactions.find((t) => t.id === currentId);
   if (!txn) return null;
 
-  const customer = getCustomerById(txn.customerId);
+  const account = getAccountById(txn.accountId);
 
   // Find linked refund or original
   const linkedOriginal = txn.refundOfTransactionId 
@@ -79,15 +93,24 @@ export function TransactionDetailDialog({
             )}>
               {formatCurrency(txn.amount)}
             </span>
-            {customer && (
+            {account && (
               <span className="text-sm font-medium mt-2 text-muted-foreground">
-                {txn.isGot ? "from" : "to"} <strong className="text-foreground">{customer.name}</strong>
+                {txn.isGot ? "from" : "to"} <strong className="text-foreground">{account.name}</strong>
               </span>
             )}
           </div>
 
           {/* Details list */}
           <div className="space-y-4 text-sm">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                ID:
+              </span>
+              <span className="text-xs text-muted-foreground font-mono select-all">
+                {txn.id}
+              </span>
+            </div>
+
             {/* Date & Time */}
             <div className="flex items-center gap-3">
               <Calendar className="h-5 w-5 text-muted-foreground shrink-0" />
@@ -180,18 +203,51 @@ export function TransactionDetailDialog({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
-          <Button 
-            onClick={() => {
-              onEdit(txn);
-              onClose();
-            }}
-          >
-            Edit Transaction
-          </Button>
+        <div className="flex justify-between items-center pt-4 border-t">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="default" className="flex items-center gap-1">
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action cannot be undone. This will mark the transaction as deleted.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => {
+                  deleteTransaction(txn.id);
+                  toast({
+                    title: "Transaction Deleted",
+                    description: "The transaction has been marked as deleted.",
+                    variant: "destructive"
+                  });
+                  onClose();
+                }}>
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Close
+            </Button>
+            <Button 
+              onClick={() => {
+                onEdit(txn);
+                onClose();
+              }}
+            >
+              Edit Transaction
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
